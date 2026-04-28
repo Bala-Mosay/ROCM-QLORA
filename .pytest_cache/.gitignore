@@ -1,13 +1,36 @@
-# Created by pytest automatically.
+# Python bytecode
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
 *.egg-info/
 dist/
 build/
-.env
+.eggs/
+
+# Model outputs (large files)
 outputs/
-tunableop_cache/
-profiles/
 *.pt
 *.safetensors
 *.gguf
+
+# Profiling and tuning caches
+tunableop_cache/
+profiles/
+*.csv
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
