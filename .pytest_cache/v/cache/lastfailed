@@ -1,0 +1,5 @@
+{
+  "tests/v2/test_kernels.py::test_kernel_output_matches_fallback": true,
+  "tests/v3/test_trainers.py::test_sft_train_returns_dict": true,
+  "tests/v3/test_trainers.py::test_grpo_advantages": true
+}
