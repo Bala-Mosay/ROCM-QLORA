@@ -205,7 +205,7 @@ def dequant_nf4_matmul_kernel(
 def _fallback_torch_dequant_int8_matmul(x, w_int8, scales, bias, block_size):
     # w_int8: [N, K], scales: [num_blocks]
     N, K = w_int8.shape
-    w_fp16 = dequantize_int8(w_int8, scales, block_size)
+    w_fp16 = dequantize_int8(w_int8, scales, block_size).to(x.dtype)
     return F.linear(x, w_fp16, bias)
 
 def _fallback_torch_dequant_nf4_matmul(x, w_packed, scales, bias, block_size):
