@@ -56,7 +56,11 @@ class LoRALinear(nn.Module):
             return self.base_layer(x)
             
         # Standard LoRA path
-        base_out = self.base_layer(x)
+        # Cast input to match base layer dtype for nn.Linear; QuantLinear handles dtypes internally.
+        if hasattr(self.base_layer, 'weight'):
+            base_out = self.base_layer(x.to(self.base_layer.weight.dtype))
+        else:
+            base_out = self.base_layer(x)
         
         # Adapter path: [Batch, In] @ [In, R] @ [R, Out] -> [Batch, Out]
         # We use transpose to match linear layer weight conventions
