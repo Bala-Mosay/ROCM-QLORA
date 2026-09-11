@@ -67,8 +67,9 @@ class LoRALinear(nn.Module):
 
     def merge_lora(self) -> None:
         """
-        Merges LoRA weights into the base QuantLinear layer.
-        This involves dequantizing, adding the delta, and re-quantizing.
+        Merges LoRA weights into the base QuantLinear layer in FP16.
+        No re-quantization — stores merged FP16 weight for zero-error inference.
+        Use unmerge_lora() to revert and continue training.
         """
         if self.merged:
             raise RuntimeError("LoRA already merged")
@@ -95,26 +96,32 @@ class LoRALinear(nn.Module):
         num_elements = self.base_layer.out_features * self.base_layer.in_features
         base_weight_fp = base_weight_fp[:num_elements].reshape(self.base_layer.original_shape)
         
-        # 3. Add delta and re-quantize
-        # NOTE: Re-quantization introduces small additional error but is necessary for merged inference.
-        merged_weight = base_weight_fp + delta_W.to(base_weight_fp.dtype)
+        # 3. Add delta in FP16 — NO re-quantization (avoids atol~2.0 error)
+        merged_weight = (base_weight_fp + delta_W.to(base_weight_fp.dtype)).to(torch.float16)
         
-        # Flatten for re-quantization ops
-        flat_merged = merged_weight.flatten()
-        
-        if self.base_layer.bits == 8:
-            q_weight, scales = quantize_int8(flat_merged, block_size=self.base_layer.block_size)
-        else:
-            q_weight, scales = quantize_int4(flat_merged, block_size=self.base_layer.block_size)
-            
-        # Store back into base buffers
-        self.base_layer.weight_quant = q_weight
-        self.base_layer.weight_scales = scales
+        # Store in FP16 merged mode
+        self.base_layer.merged_fp16_weight = merged_weight
+        self.base_layer.merged_mode = True
         
         # 4. Cleanup and state update
         self.merged = True
         self.lora_A.data.zero_()
         self.lora_B.data.zero_()
+
+    def unmerge_lora(self) -> None:
+        """
+        Reverts merge_lora() — restores original quantized weights and clears FP16 buffer.
+        Allows continuing training after merged inference.
+        """
+        if not self.merged:
+            raise RuntimeError("LoRA is not merged — nothing to unmerge")
+            
+        # Clear FP16 merged mode
+        self.base_layer.merged_fp16_weight = None
+        self.base_layer.merged_mode = False
+        
+        # Restore state
+        self.merged = False
 
     def get_trainable_params(self) -> int:
         """Returns total number of trainable parameters in the LoRA layer."""

@@ -48,6 +48,9 @@ class QuantLinear(nn.Module):
         self.use_triton_kernel: bool = False  # off by default, enabled via enable_kernel()
         # V4: Double quantization (attributes set by patch_quant_linear_for_double_quant)
         self.use_double_quant: bool = False
+        # Merged FP16 mode (set by LoRALinear.merge_lora())
+        self.register_buffer("merged_fp16_weight", None)
+        self.merged_mode: bool = False
 
     @classmethod
     def from_linear(
@@ -119,6 +122,12 @@ class QuantLinear(nn.Module):
         """
         Forward pass with dynamic dequantization.
         """
+        # Merged FP16 mode — skip dequantization entirely
+        if self.merged_mode and self.merged_fp16_weight is not None:
+            weight = self.merged_fp16_weight.to(x.dtype)
+            bias = self.bias.to(x.dtype) if self.bias is not None else None
+            return F.linear(x, weight, bias)
+
         # V5 HIP kernel dispatch (MI300X)
         if getattr(self, "use_hip_kernel", False) and x.is_cuda:
             from rocm_qlora.hip_kernels import hip_dequant_int4_matmul, hip_dequant_int8_matmul

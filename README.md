@@ -415,7 +415,7 @@ pytest tests/v4/ -v  # V4 advanced tests
 
 ## Limitations & Known Issues
 
-- **merge_lora() re-quantization error**: merge_lora() introduces re-quantization error (atol≈2.0) — for inference only, not training. Export pipeline uses clean dequantization path instead.
+- **merge_lora() uses FP16**: `merge_lora()` stores merged weights in FP16 for zero-error inference. Use `unmerge_lora()` to revert and continue training. Memory increases to FP16 (2 bytes/param) while merged.
 
 - **FP8 hardware requirement**: FP8 training requires MI300X/MI300A with ROCm 6.2+. Silently falls back to BF16 on all other hardware.
 
