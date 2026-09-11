@@ -52,7 +52,8 @@ def dequant_int8_matmul_kernel(
     pid = tl.program_id(0)
     num_pid_m = tl.cdiv(M, BLOCK_M)
     num_pid_n = tl.cdiv(N, BLOCK_N)
-    pid_m, pid_n = tl.ravel_index(pid, (num_pid_m, num_pid_n))
+    pid_m = pid // num_pid_n
+    pid_n = pid % num_pid_n
 
     # Compute offsets for tiles
     offs_am = (pid_m * BLOCK_M + tl.arange(0, BLOCK_M)) % M
@@ -131,7 +132,8 @@ def dequant_nf4_matmul_kernel(
     pid = tl.program_id(0)
     num_pid_m = tl.cdiv(M, BLOCK_M)
     num_pid_n = tl.cdiv(N, BLOCK_N)
-    pid_m, pid_n = tl.ravel_index(pid, (num_pid_m, num_pid_n))
+    pid_m = pid // num_pid_n
+    pid_n = pid % num_pid_n
 
     offs_am = (pid_m * BLOCK_M + tl.arange(0, BLOCK_M)) % M
     offs_bn = (pid_n * BLOCK_N + tl.arange(0, BLOCK_N)) % N
