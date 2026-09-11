@@ -87,11 +87,11 @@ def dequant_int8_matmul_kernel(
         scales = tl.load(scales_ptr + scale_idx)
         
         # Dequantize B
-        b_fp16 = b_int8.to(tl.float16) * scales.to(tl.float16)
+        b_fp32 = b_int8.to(tl.float32) * scales.to(tl.float32)
         
         # Matrix multiply (tl.dot expects [M, K] and [K, N])
-        # b_fp16 is [BLOCK_K, BLOCK_N] (since b_ptrs was [BLOCK_K, BLOCK_N])
-        acc += tl.dot(a, b_fp16)
+        # b_fp32 is [BLOCK_K, BLOCK_N] (since b_ptrs was [BLOCK_K, BLOCK_N])
+        acc += tl.dot(a, b_fp32)
         
         # Advance pointers
         a_ptrs += BLOCK_K * stride_ak
@@ -182,9 +182,9 @@ def dequant_nf4_matmul_kernel(
         scale_idx = (n_idx * K + k_idx) // block_size
         scales = tl.load(scales_ptr + scale_idx)
         
-        b_fp16 = b_val.to(tl.float16) * scales.to(tl.float16)
+        b_fp32 = b_val.to(tl.float32) * scales.to(tl.float32)
         
-        acc += tl.dot(a, b_fp16)
+        acc += tl.dot(a, b_fp32)
         
         a_ptrs += BLOCK_K * stride_ak
 
