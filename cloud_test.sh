@@ -29,7 +29,7 @@ print('PyTorch version:', torch.__version__)
 if torch.cuda.is_available():
     print('GPU:', torch.cuda.get_device_name(0))
     props = torch.cuda.get_device_properties(0)
-    print('VRAM:', round(props.total_mem / 1e9, 1), 'GB')
+    print('VRAM:', round(props.total_memory / 1e9, 1), 'GB')
     print('Compute capability:', props.major, '.', props.minor)
     print('Architecture:', props.name)
 else:
