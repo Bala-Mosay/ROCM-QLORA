@@ -40,7 +40,7 @@ pip install rocm-qlora
 ### From Source
 
 ```bash
-git clone https://github.com/your-org/rocm-qlora.git
+git clone https://github.com/Bala-Mosay/ROCM-QLORA.git
 cd rocm-qlora
 pip install -e .
 ```
@@ -228,7 +228,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ### Development Setup
 
 ```bash
-git clone https://github.com/your-org/rocm-qlora.git
+git clone https://github.com/Bala-Mosay/ROCM-QLORA.git
 cd rocm-qlora
 pip install -e ".[dev]"
 pre-commit install
@@ -260,9 +260,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/your-org/rocm-qlora/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/rocm-qlora/discussions)
-- **Documentation**: [Read the Docs](https://rocm-qlora.readthedocs.io/)
+- **Issues**: [GitHub Issues](https://github.com/Bala-Mosay/ROCM-QLORA/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Bala-Mosay/ROCM-QLORA/discussions)
 
 ## 🔄 Changelog
 
