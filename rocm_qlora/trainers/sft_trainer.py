@@ -181,7 +181,7 @@ class ROCmSFTTrainer:
                     global_step += 1
                     
                     if global_step % self.config.log_every == 0:
-                        avg_loss = total_loss / (step + 1)
+                        avg_loss = total_loss / (global_step + 1)
                         elapsed = time.time() - start_time
                         lr = self.scheduler.get_last_lr()[0]
                         print_on_main(
@@ -211,7 +211,9 @@ class ROCmSFTTrainer:
 
     def save_lora(self, path: str):
         """Saves LoRA weights, handling FSDP gathering if necessary."""
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        dir_name = os.path.dirname(path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
         barrier(self.rank)
         
         if self.is_fsdp:

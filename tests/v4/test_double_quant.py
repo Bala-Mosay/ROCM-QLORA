@@ -98,7 +98,7 @@ def test_patch_returns_count():
     # Check patching (handling potential LoRA wrapper)
     q_proj = model.q_proj
     if isinstance(q_proj, LoRALinear):
-        q_proj = q_proj.base
+        q_proj = q_proj.base_layer
         
     assert q_proj.use_double_quant is True
     assert hasattr(q_proj, "c2")

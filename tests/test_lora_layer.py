@@ -84,7 +84,7 @@ def test_gradient_blocked_base():
     loss.backward()
     
     # Buffers shouldn't have grad attributes at all, but check state
-    for name, buffer in lora.base.named_buffers():
+    for name, buffer in lora.base_layer.named_buffers():
         assert buffer.grad is None
 
 def test_merge_lora_output_close():

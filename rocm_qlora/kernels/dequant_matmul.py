@@ -207,13 +207,14 @@ def _fallback_torch_dequant_int8_matmul(x, w_int8, scales, bias, block_size):
     return F.linear(x, w_fp16, bias)
 
 def _fallback_torch_dequant_nf4_matmul(x, w_packed, scales, bias, block_size):
-    # w_packed is [N, K//2]
-    # We need to know the original shape. QuantLinear usually has out_features, in_features.
-    # From prompt: w_int8 shape: [N, K] (row-major)
-    # For NF4, it's [N, K//2]
-    N = w_packed.shape[0]
-    K = w_packed.shape[1] * 2
-    w_fp16 = dequantize_int4(w_packed.flatten(), scales, block_size).reshape(N, K)
+    # w_packed can be 1D (from quantize_int4) or 2D [N, K//2].
+    # Infer K from x.shape[-1] (the input feature dimension).
+    K = x.shape[-1]
+    # int4 packing: 2 values per uint8 byte → total elements = w_packed.numel() * 2
+    N = w_packed.numel() * 2 // K
+    w_fp16 = dequantize_int4(w_packed.flatten(), scales, block_size).reshape(N, K).to(x.dtype)
+    if bias is not None:
+        bias = bias.to(x.dtype)
     return F.linear(x, w_fp16, bias)
 
 def _triton_dequant_int8_matmul(x, w_int8, scales, bias, block_size, cfg):
@@ -251,7 +252,13 @@ def _triton_dequant_nf4_matmul(x, w_packed, scales, bias, block_size, cfg):
     K = x.shape[-1]
     x_2d = x.view(-1, K)
     M, _ = x_2d.shape
-    N = w_packed.shape[0]
+    # w_packed can be 1D (from quantize_int4) or 2D [N, K//2]
+    if w_packed.dim() == 1:
+        N = w_packed.numel() * 2 // K
+        w_packed_2d = w_packed.view(N, -1)
+    else:
+        N = w_packed.shape[0]
+        w_packed_2d = w_packed
     
     output = torch.empty((M, N), device=x.device, dtype=torch.float16)
     
@@ -260,10 +267,10 @@ def _triton_dequant_nf4_matmul(x, w_packed, scales, bias, block_size, cfg):
     )
     
     dequant_nf4_matmul_kernel[grid](
-        x_2d, w_packed, scales, output, bias,
+        x_2d, w_packed_2d, scales, output, bias,
         M, N, K,
         x_2d.stride(0), x_2d.stride(1),
-        w_packed.stride(0), w_packed.stride(1),
+        w_packed_2d.stride(0), w_packed_2d.stride(1),
         output.stride(0), output.stride(1),
         block_size,
         NF4_TABLE.to(x.device),

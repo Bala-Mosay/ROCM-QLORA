@@ -46,7 +46,7 @@ class QuantLinear(nn.Module):
             
         # V2: Kernel integration
         self.use_triton_kernel: bool = False  # off by default, enabled via enable_kernel()
-        # V4: Double quantization
+        # V4: Double quantization (attributes set by patch_quant_linear_for_double_quant)
         self.use_double_quant: bool = False
 
     @classmethod
@@ -119,6 +119,20 @@ class QuantLinear(nn.Module):
         """
         Forward pass with dynamic dequantization.
         """
+        # V5 HIP kernel dispatch (MI300X)
+        if getattr(self, "use_hip_kernel", False) and x.is_cuda:
+            from rocm_qlora.hip_kernels import hip_dequant_int4_matmul, hip_dequant_int8_matmul
+            if self.bits == 8:
+                return hip_dequant_int8_matmul(
+                    x, self.weight_quant, self.weight_scales,
+                    self.bias, self.block_size
+                )
+            else:
+                return hip_dequant_int4_matmul(
+                    x, self.weight_quant, self.weight_scales,
+                    self.bias, self.block_size
+                )
+
         if self.use_triton_kernel and x.is_cuda:
             from rocm_qlora.kernels import fused_dequant_int8_matmul, fused_dequant_nf4_matmul
             if self.bits == 8:
@@ -134,6 +148,11 @@ class QuantLinear(nn.Module):
 
         # 1. Dequantize based on bit depth
         if self.use_double_quant and self.bits == 4:
+            if not hasattr(self, 'c2') or not hasattr(self, 'c2_scales'):
+                raise RuntimeError(
+                    "Double quantization attributes not initialized. "
+                    "Call patch_quant_linear_for_double_quant() first."
+                )
             from rocm_qlora.quantization.double_quant import double_dequantize, DoubleQuantState
             state = DoubleQuantState(
                 W_quant=self.weight_quant,

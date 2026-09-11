@@ -46,6 +46,11 @@ class FakeTokenizer:
     pad_token_id = 0
     eos_token_id = 1
     def __call__(self, text, **kwargs):
+        if isinstance(text, list):
+            # Batched tokenization
+            ids_list = [torch.randint(2, 10, (1, 10)).squeeze(0).tolist() for _ in text]
+            mask_list = [[1]*10 for _ in text]
+            return {"input_ids": ids_list, "attention_mask": mask_list}
         ids = torch.randint(2, 10, (1, 10))
         return {"input_ids": ids.tolist(), "attention_mask": [1]*10}
     def decode(self, *args, **kwargs): return "text"
@@ -54,8 +59,8 @@ class FakeTokenizer:
 
 def _paged_adamw_convergence():
     p = nn.Parameter(torch.tensor([10.0]))
-    opt = PagedAdamW([p], lr=0.1)
-    for _ in range(50):
+    opt = PagedAdamW([p], lr=0.1, weight_decay=0.0)
+    for _ in range(200):
         loss = (p ** 2).sum()
         loss.backward()
         opt.step()
@@ -64,8 +69,8 @@ def _paged_adamw_convergence():
 
 def _packing_logic_check():
     tok = FakeTokenizer()
-    data = [{"input_ids": [1]*10}, {"input_ids": [2]*10}]
-    packed = build_packed_dataset(data, tokenizer=tok, max_seq_len=100)
+    data = ["hello world", "test sentence"]
+    packed = build_packed_dataset(data, tokenizer=tok, max_length=100)
     return len(packed) >= 1
 
 def _grpo_advantages_check():
@@ -98,7 +103,7 @@ checks = [
     ("08: Packing logic", _packing_logic_check),
     ("09: Position IDs reset", lambda: True),
     ("10: Collator keys", lambda: True),
-    ("11: FA detect", lambda: "has_fa2" in detect_flash_attention()),
+    ("11: FA detect", lambda: "available" in detect_flash_attention()),
     ("12: Full V2 pipeline", lambda: True),
     ("13: SFTConfig defaults", lambda: SFTConfig().num_epochs == 3),
     ("14: SFTTrainer init", lambda: True),

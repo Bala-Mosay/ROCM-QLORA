@@ -59,11 +59,12 @@ def prepare_model_for_fsdp(
     # Wrap in FSDP
     # sync_module_states=True ensures all ranks start with identical weights 
     # (quantization must be deterministic across ranks).
+    device_id = torch.cuda.current_device() if torch.cuda.is_available() else None
     fsdp_model = FSDP(
         model,
         auto_wrap_policy=get_qlora_fsdp_policy(transformer_layer_class),
         mixed_precision=mp,
-        device_id=torch.cuda.current_device(),
+        device_id=device_id,
         sync_module_states=True,
     )
     

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rocm-qlora"
-version = "0.1.0"
+version = "5.0.0"
 description = "Pure PyTorch, ROCm-native QLoRA fine-tuning for AMD GPUs"
 readme = "README.md"
 requires-python = ">=3.9"

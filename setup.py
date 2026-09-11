@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="rocm-qlora",
-    version="0.1.0",
+    version="5.0.0",
     description="A pure PyTorch, ROCm-native QLoRA fine-tuning library for AMD GPUs.",
     author="Antigravity",
     packages=find_packages(),
@@ -16,6 +16,7 @@ setup(
         "datasets>=2.18.0",
         "peft>=0.10.0",
         "accelerate>=0.28.0",
+        "packaging",
     ],
     extras_require={
         "dev": [

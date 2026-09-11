@@ -50,11 +50,8 @@ class FP8LinearWrapper(nn.Module):
             # 1. Base Weight (QuantLinear) -> FP16
             # We don't want to call self.base(x) yet because that adds LoRA too.
             # We need the quantized base weight dequantized.
-            weight_fp16 = self.base.base(torch.zeros(1, self.base.base.in_features, device=x.device, dtype=x.dtype)).detach() # Dummy call to get dequantized weight?
-            # Actually, QuantLinear doesn't store dequantized weight. We must dequantize manually or patch it.
-            # Let's use the dequantization logic directly.
             from rocm_qlora.quantization.quant_ops import dequantize_int8, dequantize_int4
-            ql = self.base.base
+            ql = self.base.base_layer
             if ql.use_double_quant:
                 from rocm_qlora.quantization.double_quant import double_dequantize, DoubleQuantState
                 state = DoubleQuantState(ql.weight_quant, ql.c2, ql.c2_scales, ql.block_size, ql.blocksize_2, ql.original_shape, ql.use_fp8_c2)

@@ -1,29 +1,22 @@
 """
-rocm-qlora: Pure PyTorch QLoRA fine-tuning for AMD GPUs.
-No bitsandbytes. No CUDA dependencies.
+rocm-qlora: Pure PyTorch QLoRA fine-tuning for AMD GPUs with ROCm.
+Zero bitsandbytes. Zero CUDA dependencies.
 
-Quick start:
-    from rocm_qlora import quantize_model, check_rocm
-    from transformers import AutoModelForCausalLM
-
-    model = AutoModelForCausalLM.from_pretrained("...", torch_dtype=torch.float16)
-    model = quantize_model(model, bits=8, lora_r=8)
-    model = model.to("cuda")
-    # Ready for QLoRA fine-tuning on AMD GPU
-
-    # Or with HF plugin (requires transformers >= 4.40):
-    from rocm_qlora.hf_integration import RocmQLoraConfig
-    model = AutoModelForCausalLM.from_pretrained(
-        "...", quantization_config=RocmQLoraConfig(bits=8)
-    )
+Versions:
+  V1: Core quantization + LoRA
+  V2: Triton kernels, packing, flash attention, paged optimizer, TunableOp
+  V3: FSDP, SFT/DPO/GRPO trainers, HF integration
+  V4: Double quantization, GGUF/vLLM export
+  V5: HIP assembly kernels for INT4/INT8 matmul (MI300X)
 """
-import os
 
-# V1 core — immutable API
-from rocm_qlora.model.quantize_model import quantize_model
+import os
+import torch
+
+from rocm_qlora.utils.rocm_utils import check_rocm
 from rocm_qlora.quantization.quant_linear import QuantLinear
 from rocm_qlora.lora.lora_layer import LoRALinear
-from rocm_qlora.utils.rocm_utils import check_rocm
+from rocm_qlora.model.quantize_model import quantize_model
 
 # V2 additions
 from rocm_qlora.kernels import (
@@ -58,7 +51,22 @@ from rocm_qlora.export import (
     get_vllm_serve_commands,
 )
 
-__version__ = "4.0.0"
+# V5 additions — HIP assembly kernels for INT4/INT8 matmul (MI300X)
+from rocm_qlora.hip_kernels import (
+    is_hip_kernel_available,
+    enable_hip_kernels,
+    hip_dequant_int4_matmul,
+    hip_dequant_int8_matmul,
+    benchmark_hip_vs_triton,
+)
+from rocm_qlora.hip_kernels.build_utils import (
+    find_hipcc,
+    is_hipcc_available,
+    compile_hip_kernel,
+    get_or_compile_int4_kernel,
+)
+
+__version__ = "5.0.0"
 
 __all__ = [
     # V1
@@ -82,16 +90,28 @@ __all__ = [
     "export_for_vllm_merged",
     "export_lora_adapter",
     "get_vllm_serve_commands",
+    # V5
+    "is_hip_kernel_available",
+    "enable_hip_kernels",
+    "hip_dequant_int4_matmul",
+    "hip_dequant_int8_matmul",
+    "benchmark_hip_vs_triton",
+    "find_hipcc",
+    "is_hipcc_available",
+    "compile_hip_kernel",
+    "get_or_compile_int4_kernel",
     "__version__",
 ]
 
 if not os.environ.get("ROCM_QLORA_QUIET"):
     _info = check_rocm()
     _device_info = get_device_info()
+    _hip_available = is_hip_kernel_available()
     print(
         f"[rocm-qlora {__version__}] "
         f"GPU: {_info['device_name']} | "
         f"ROCm: {_info['version']} | "
         f"Triton: {'V' if is_triton_available() else 'X'} | "
+        f"HIP-Kernels: {'V' if _hip_available else 'X'} | "
         f"Arch: {_device_info.get('arch', 'unknown')}"
     )

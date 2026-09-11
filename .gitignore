@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+*.so
+*.o
+*.hip
+profiles/
+tunableop_cache/
+cloud_results/
+*.tar.gz
+tmp_*.py
+hello_test.py
+benchmark_cpu.py

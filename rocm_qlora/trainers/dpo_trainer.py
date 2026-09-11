@@ -204,6 +204,7 @@ class ROCmDPOTrainer:
         device = next(self.policy_model.parameters()).device
         global_step = 0
         start_time = time.time()
+        metrics = {"loss": 0.0, "accuracy": 0.0, "reward_margin": 0.0}
         
         for epoch in range(self.config.num_epochs):
             if hasattr(self.sampler, 'set_epoch'):

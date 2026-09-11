@@ -159,8 +159,10 @@ class ROCmGRPOTrainer:
     def train(self, prompts: List[Dict[str, str]]) -> Dict[str, Any]:
         print_on_main(f"\n[grpo] Starting GRPO reasoning training...", self.rank)
         self.model.train()
-        device = torch.cuda.current_device()
+        device = next(self.model.parameters()).device
         start_time = time.time()
+        rewards = []
+        step = 0
         
         for step in range(self.config.num_steps):
             # Cycle through prompts

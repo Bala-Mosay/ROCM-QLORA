@@ -396,7 +396,7 @@ checks = [
      lambda: _check_full_v2_pipeline()),
 
     # ── V4 VALIDATION (17-20) ─────────────────────────────────────────
-    ("17: double_quantize→dequant shape preserved + bits_saved>0",
+    ("17: double_quantize->dequant shape preserved + bits_saved>0",
      lambda: _v4_double_quant_check()),
 
     ("18: detect_fp8_support() keys present, no crash on CPU",
@@ -405,7 +405,7 @@ checks = [
     ("19: TunableOp enable/disable/status round-trip",
      lambda: _v4_tunableop_check()),
 
-    ("20: Full V4 export: quantize→export FP16→no lora keys→adapter config valid",
+    ("20: Full V4 export: quantize->export FP16->no lora keys->adapter config valid",
      lambda: _v4_export_check()),
 ]
 

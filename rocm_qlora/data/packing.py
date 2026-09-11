@@ -57,15 +57,8 @@ def pack_sequences(
                     'labels': current_labels + [-100] * pad_len,
                 })
             
-            # Start a new pack with the current sample
-            # We don't add EOS here yet, it will be added when the NEXT sample is appended or when flushed.
-            # Actually, to be consistent with the logic above, we should add EOS now or 
-            # change the logic. The logic above adds EOS *with* the sample.
-            # Let's stick to the prompt's logic: 
-            # if we can't fit it, we finalize, then current_ids = sample['input_ids']
-            # Wait, if we start a new pack, we still need to add EOS later.
-            
-            # Refined logic to match prompt exactly:
+            # Start a new pack with the current sample.
+            # EOS is added with each sample to separate packed sequences.
             current_ids = ids + [eos_token_id]
             current_mask = mask + [1]
             current_labels = labels + [-100]

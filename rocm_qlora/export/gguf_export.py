@@ -43,7 +43,7 @@ def _export_dequant_layer(lora_linear: nn.Module) -> torch.Tensor:
     if not isinstance(lora_linear, LoRALinear):
         raise TypeError(f"Expected LoRALinear, got {type(lora_linear)}")
     
-    quant = lora_linear.base  # QuantLinear
+    quant = lora_linear.base_layer  # QuantLinear
     bits = quant.bits
     
     # Step 1: Dequantize base weights to FP16
@@ -117,9 +117,9 @@ def _build_export_state_dict(model: nn.Module) -> Dict[str, torch.Tensor]:
             state_dict[weight_key] = merged_weight
             
             # Handle bias if present
-            if module.base.bias is not None:
+            if module.base_layer.bias is not None:
                 bias_key = f"{base_key}.bias"
-                state_dict[bias_key] = module.base.bias.data.cpu().to(torch.float16)
+                state_dict[bias_key] = module.base_layer.bias.data.cpu().to(torch.float16)
     
     return state_dict
 

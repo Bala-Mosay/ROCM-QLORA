@@ -27,14 +27,14 @@ class LoRALinear(nn.Module):
         lora_dropout: float = 0.0
     ):
         super().__init__()
-        self.base = quant_linear
+        self.base_layer = quant_linear
         self.r = r
         self.lora_alpha = lora_alpha
         self.merged = False
         
         # NOTE: Freeze base model weights immediately.
         # QuantLinear uses buffers, but we ensure no parameters accidentally remain trainable.
-        for p in self.base.parameters():
+        for p in self.base_layer.parameters():
             p.requires_grad_(False)
             
         # LoRA parameters
@@ -53,10 +53,10 @@ class LoRALinear(nn.Module):
         Forward pass: base_output + (x @ A.T @ B.T * scaling)
         """
         if self.merged:
-            return self.base(x)
+            return self.base_layer(x)
             
         # Standard LoRA path
-        base_out = self.base(x)
+        base_out = self.base_layer(x)
         
         # Adapter path: [Batch, In] @ [In, R] @ [R, Out] -> [Batch, Out]
         # We use transpose to match linear layer weight conventions
@@ -78,22 +78,22 @@ class LoRALinear(nn.Module):
         delta_W = (self.lora_B @ self.lora_A) * self.scaling
         
         # 2. Dequantize base weight directly from buffers (bypassing forward logic)
-        if self.base.bits == 8:
+        if self.base_layer.bits == 8:
             base_weight_fp = dequantize_int8(
-                self.base.weight_quant,
-                self.base.weight_scales,
-                block_size=self.base.block_size
+                self.base_layer.weight_quant,
+                self.base_layer.weight_scales,
+                block_size=self.base_layer.block_size
             )
         else:
             base_weight_fp = dequantize_int4(
-                self.base.weight_quant,
-                self.base.weight_scales,
-                block_size=self.base.block_size
+                self.base_layer.weight_quant,
+                self.base_layer.weight_scales,
+                block_size=self.base_layer.block_size
             )
             
         # Reshape to original layout [Out, In]
-        num_elements = self.base.out_features * self.base.in_features
-        base_weight_fp = base_weight_fp[:num_elements].reshape(self.base.original_shape)
+        num_elements = self.base_layer.out_features * self.base_layer.in_features
+        base_weight_fp = base_weight_fp[:num_elements].reshape(self.base_layer.original_shape)
         
         # 3. Add delta and re-quantize
         # NOTE: Re-quantization introduces small additional error but is necessary for merged inference.
@@ -102,14 +102,14 @@ class LoRALinear(nn.Module):
         # Flatten for re-quantization ops
         flat_merged = merged_weight.flatten()
         
-        if self.base.bits == 8:
-            q_weight, scales = quantize_int8(flat_merged, block_size=self.base.block_size)
+        if self.base_layer.bits == 8:
+            q_weight, scales = quantize_int8(flat_merged, block_size=self.base_layer.block_size)
         else:
-            q_weight, scales = quantize_int4(flat_merged, block_size=self.base.block_size)
+            q_weight, scales = quantize_int4(flat_merged, block_size=self.base_layer.block_size)
             
         # Store back into base buffers
-        self.base.weight_quant = q_weight
-        self.base.weight_scales = scales
+        self.base_layer.weight_quant = q_weight
+        self.base_layer.weight_scales = scales
         
         # 4. Cleanup and state update
         self.merged = True

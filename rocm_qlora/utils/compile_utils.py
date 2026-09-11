@@ -75,11 +75,13 @@ def compile_lora_only(model: nn.Module) -> nn.Module:
     logger.info(f"Successfully compiled {compiled_count} LoRA modules.")
     return model
 
-def warmup_compiled_model(model: nn.Module, device: str = "cuda", seq_len: int = 512, batch_size: int = 1):
+def warmup_compiled_model(model: nn.Module, device: str = None, seq_len: int = 512, batch_size: int = 1):
     """
     Run warmup forward passes to trigger TorchInductor compilation.
     """
-    logger.info(f"Starting warmup for compiled model (seq_len={seq_len})...")
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(f"Starting warmup for compiled model (seq_len={seq_len}, device={device})...")
     model.eval()
     
     # We need to know the hidden_size. We can try to infer it from the model.

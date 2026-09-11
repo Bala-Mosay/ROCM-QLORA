@@ -40,7 +40,10 @@ def init_distributed(backend: str = "nccl", timeout_minutes: int = 30) -> Tuple[
 def setup_device(local_rank: int) -> torch.device:
     """
     Sets the current CUDA device and returns the device object.
+    Falls back to CPU if CUDA is not available.
     """
+    if not torch.cuda.is_available():
+        return torch.device("cpu")
     torch.cuda.set_device(local_rank)
     return torch.device(f"cuda:{local_rank}")
 

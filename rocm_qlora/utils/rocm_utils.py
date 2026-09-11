@@ -32,7 +32,11 @@ def get_memory_stats(device: str = "cuda") -> Dict[str, float]:
         
     Returns:
         dict: Dictionary with 'allocated_gb', 'reserved_gb', and 'free_gb'.
+              Returns zeros if no CUDA device is available.
     """
+    if not torch.cuda.is_available():
+        return {"allocated_gb": 0.0, "reserved_gb": 0.0, "free_gb": 0.0}
+    
     allocated = torch.cuda.memory_allocated(device) / (1024**3)
     reserved = torch.cuda.memory_reserved(device) / (1024**3)
     
