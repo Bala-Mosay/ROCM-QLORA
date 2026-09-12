@@ -43,13 +43,10 @@ class FP8LinearWrapper(nn.Module):
                 return self.base(x)
         
         elif self.backend == "native":
-            # NOTE: native torch._scaled_mm is highly experimental on ROCm.
-            # We dequantize the base weight to FP16 first.
-            # Then cast x and weight to FP8 for matmul.
+            # torch._scaled_mm on ROCm requires BOTH inputs to be float8.
+            # We dequantize the base weight, then quantize both x and w to FP8.
             
             # 1. Base Weight (QuantLinear) -> FP16
-            # We don't want to call self.base(x) yet because that adds LoRA too.
-            # We need the quantized base weight dequantized.
             from rocm_qlora.quantization.quant_ops import dequantize_int8, dequantize_int4
             ql = self.base.base_layer
             if ql.use_double_quant:
@@ -61,31 +58,31 @@ class FP8LinearWrapper(nn.Module):
             else:
                 w_fp16 = dequantize_int4(ql.weight_quant, ql.weight_scales, ql.block_size).view(ql.original_shape).to(x.dtype)
             
-            # 2. Cast to FP8
+            # 2. Cast BOTH x and w to FP8 with per-tensor scaling
             f8_dtype = get_fp8_dtype(self.config.forward_dtype)
-            x_f8 = x.to(f8_dtype)
-            w_f8 = w_fp16.to(f8_dtype)
+            # Per-tensor scaling: scale = absmax / 448.0 (max E4M3 representable value)
+            w_scale = torch.tensor(w_fp16.abs().max().item() / 448.0, dtype=torch.float32, device=x.device)
+            w_f8 = (w_fp16 / w_scale).to(f8_dtype)
             
-            # 3. Scaled Matmul (Conceptual fallback if scaled_mm unavailable)
+            # 3. Scaled Matmul (torch._scaled_mm requires 2D inputs)
             try:
                 if hasattr(torch, '_scaled_mm'):
-                    # ROCm 6.2+ supports this
-                    # torch._scaled_mm requires 2D inputs — reshape if needed
-                    original_shape = x_f8.shape
-                    if x_f8.dim() > 2:
-                        x_f8_2d = x_f8.reshape(-1, x_f8.shape[-1])
+                    original_shape = x.shape
+                    if x.dim() > 2:
+                        x_2d = x.reshape(-1, x.shape[-1])
                     else:
-                        x_f8_2d = x_f8
-                    scale_x = torch.tensor([1.0], device=x.device)
-                    scale_w = torch.tensor([1.0], device=x.device)
-                    base_out = torch._scaled_mm(x_f8_2d, w_f8.t(), scale_x, scale_w, out_dtype=x.dtype)
+                        x_2d = x
+                    
+                    x_scale = torch.tensor(x_2d.abs().max().item() / 448.0, dtype=torch.float32, device=x.device)
+                    x_f8 = (x_2d / x_scale).to(f8_dtype)
+                    
+                    base_out = torch._scaled_mm(x_f8, w_f8.t(), scale_a=x_scale, scale_b=w_scale, out_dtype=x.dtype)
                     base_out = base_out.reshape(*original_shape[:-1], -1)
                 else:
-                    # Fallback to standard matmul if scaled_mm missing in this build
-                    base_out = F.linear(x_f8.to(x.dtype), w_f8.to(x.dtype))
+                    base_out = F.linear(x, w_fp16)
             except RuntimeError:
-                # FP8 GEMM not supported by HIPBLAS on this hardware — fall back to BF16
-                base_out = F.linear(x.to(w_fp16.dtype), w_fp16)
+                # FP8 GEMM not supported — fall back to BF16 matmul
+                base_out = F.linear(x, w_fp16)
             
             # 4. Add Bias and LoRA
             if ql.bias is not None:

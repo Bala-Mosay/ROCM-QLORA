@@ -18,8 +18,19 @@ from typing import Tuple, Optional, Dict, Any
 from rocm_qlora.quantization.quant_ops import quantize_int4, dequantize_int4
 
 def _has_fp8() -> bool:
-    """Checks if the current PyTorch version/hardware supports FP8."""
-    return hasattr(torch, 'float8_e4m3fn')
+    """Checks if the current PyTorch version/hardware supports FP8.
+    Checks for AMD-native float8_e4m3fnuz (ROCm) or NVIDIA float8_e4m3fn (CUDA).
+    """
+    return hasattr(torch, 'float8_e4m3fnuz') or hasattr(torch, 'float8_e4m3fn')
+
+
+def _get_fp8_dtype() -> torch.dtype:
+    """Returns the appropriate FP8 E4M3 dtype for this platform.
+    Prefers AMD-native float8_e4m3fnuz on ROCm, float8_e4m3fn on CUDA.
+    """
+    if hasattr(torch, 'float8_e4m3fnuz'):
+        return torch.float8_e4m3fnuz
+    return torch.float8_e4m3fn
 
 @dataclass
 class DoubleQuantState:
@@ -69,7 +80,7 @@ def double_quantize(
         # Using a simple cast to FP8. 
         # Note: In real production with ROCm 6.2, we'd use hipblasLt or tuned kernels.
         # Here we follow the PyTorch-native approach.
-        c2 = normalized_c1.to(torch.float8_e4m3fn)
+        c2 = normalized_c1.to(_get_fp8_dtype())
     else:
         # INT8 fallback
         normalized_c1 = reshaped_c1 / c2_scales

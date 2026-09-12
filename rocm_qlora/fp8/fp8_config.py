@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 
-from rocm_qlora.quantization.double_quant import _has_fp8
+from rocm_qlora.quantization.double_quant import _has_fp8, _get_fp8_dtype
 from rocm_qlora.kernels import get_device_info
 
 def detect_fp8_support() -> Dict[str, Any]:
@@ -70,15 +70,21 @@ class FP8Config:
     amax_compute_algo: str = "max"       # "max" or "most_recent"
 
 def get_fp8_dtype(format_str: str) -> torch.dtype:
-    """Maps string formats to torch.float8 dtypes."""
+    """Maps string formats to torch.float8 dtypes.
+    Uses AMD-native float8_e4m3fnuz on ROCm, float8_e4m3fn on CUDA.
+    """
     if format_str == "e4m3":
-        if not hasattr(torch, 'float8_e4m3fn'):
-            raise RuntimeError("torch.float8_e4m3fn not available. Check PyTorch version.")
-        return torch.float8_e4m3fn
+        if hasattr(torch, 'float8_e4m3fnuz'):
+            return torch.float8_e4m3fnuz  # AMD/ROCm native
+        if hasattr(torch, 'float8_e4m3fn'):
+            return torch.float8_e4m3fn    # NVIDIA/CUDA native
+        raise RuntimeError("No FP8 E4M3 dtype available. Check PyTorch version.")
     elif format_str == "e5m2":
-        if not hasattr(torch, 'float8_e5m2'):
-            raise RuntimeError("torch.float8_e5m2 not available. Check PyTorch version.")
-        return torch.float8_e5m2
+        if hasattr(torch, 'float8_e5m2fnuz'):
+            return torch.float8_e5m2fnuz  # AMD/ROCm native
+        if hasattr(torch, 'float8_e5m2'):
+            return torch.float8_e5m2      # NVIDIA/CUDA native
+        raise RuntimeError("No FP8 E5M2 dtype available. Check PyTorch version.")
     else:
         raise ValueError(f"Unknown FP8 format: {format_str}")
 

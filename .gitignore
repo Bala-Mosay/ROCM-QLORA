@@ -7,7 +7,6 @@ dist/
 build/
 *.so
 *.o
-*.hip
 profiles/
 tunableop_cache/
 cloud_results/
