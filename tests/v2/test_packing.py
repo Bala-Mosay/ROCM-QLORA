@@ -52,13 +52,11 @@ def test_no_sample_skipped(fake_samples):
     original_total = sum(len(s['input_ids']) for s in fake_samples)
     
     packed = pack_sequences(fake_samples, max_len, eos_token_id=1, pad_token_id=0)
-    # Total real tokens in packed (excluding EOS added by packing and padding)
-    # Wait, the efficiency calculation considers EOS as real tokens in some contexts?
-    # No, attention_mask = 1 for EOS in packing logic.
-    packed_total_with_eos = sum(sum(p['attention_mask']) for p in packed)
+    # EOS separators have attention_mask=0 (not attended to), so they don't count
+    packed_total = sum(sum(p['attention_mask']) for p in packed)
     
-    # original_total + len(fake_samples) (one EOS per sample)
-    assert packed_total_with_eos == original_total + len(fake_samples)
+    # All original tokens preserved, EOS excluded from attention mask
+    assert packed_total == original_total
 
 def test_sort_by_length_descending(fake_samples):
     sorted_samples = sort_by_length(fake_samples)
@@ -105,14 +103,15 @@ def test_oversized_sample_skipped_with_warning(caplog):
     assert "exceeds max_length" in caplog.text
 
 def test_zero_waste_perfect_packing():
-    # 10 samples of 50 tokens. Each needs 50 + 1 (EOS) = 51.
-    # 10 * 51 = 510. Max length 512. 2 pads.
+    # 10 samples of 50 tokens. Each needs 50 + 1 (EOS with mask=0) = 51.
+    # 10 * 51 = 510. Max length 512. 2 pads. 10 EOS separators (mask=0).
     samples = [{'input_ids': [1]*50, 'attention_mask': [1]*50, 'labels': [1]*50} for _ in range(10)]
     packed = pack_sequences(samples, 512, 1, 0)
     assert len(packed) == 1
     eff = compute_packing_efficiency(samples, packed, 512)
-    # original_tokens = 500. padding = 2. eff = 500 / 502 * 100 = 99.6%
-    assert eff['efficiency_pct'] > 99.0
+    # original_tokens = 500. EOS masked (10), padding (2) -> 12 total zeros
+    # efficiency = 500 / (500 + 12) * 100 = 97.6%
+    assert eff['efficiency_pct'] > 97.0
 
 def test_build_position_ids_resets_at_eos():
     # [10, 20, 1, 30, 40, 50, 1, 60] with EOS=1

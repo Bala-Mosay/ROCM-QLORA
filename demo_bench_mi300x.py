@@ -223,6 +223,7 @@ def run_training_config(
         collator = PackedSequenceCollator(
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
+            use_block_attention=True,
         )
         dataloader = DataLoader(packed, batch_size=batch_size, collate_fn=collator, shuffle=True)
         print(f"  Packing: {efficiency['efficiency_pct']:.1f}% efficiency, "

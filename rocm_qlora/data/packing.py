@@ -46,7 +46,7 @@ def pack_sequences(
         
         if len(current_ids) + needed <= max_length:
             current_ids += ids + [eos_token_id]
-            current_mask += mask + [1]
+            current_mask += mask + [0]
             current_labels += labels + [-100]  # EOS: no loss
         else:
             if current_ids:  # finalize current pack
@@ -60,7 +60,7 @@ def pack_sequences(
             # Start a new pack with the current sample.
             # EOS is added with each sample to separate packed sequences.
             current_ids = ids + [eos_token_id]
-            current_mask = mask + [1]
+            current_mask = mask + [0]
             current_labels = labels + [-100]
 
     if current_ids:  # flush final pack
@@ -125,18 +125,27 @@ def build_packed_dataset(
         
     # Tokenize all
     logger.info(f"Tokenizing {len(texts)} samples...")
+    # Tokenize with room for BOS token (prepend later)
+    effective_max = max_length - 1  # reserve 1 token for BOS
     encoded = tokenizer(
         texts,
-        max_length=max_length,
+        max_length=effective_max,
         truncation=True,
         padding=False,
-        add_special_tokens=False # We handle EOS/SOS manually or via packing
+        add_special_tokens=False
     )
+    
+    bos_token_id = getattr(tokenizer, 'bos_token_id', None)
     
     samples = []
     for i in range(len(texts)):
         ids = encoded['input_ids'][i]
         mask = encoded['attention_mask'][i]
+        
+        # Prepend BOS token if available (matches base model pretrain format)
+        if bos_token_id is not None:
+            ids = [bos_token_id] + ids
+            mask = [1] + mask
         
         # Build labels: copy input_ids, set pad/ignore positions to -100
         labels = list(ids)

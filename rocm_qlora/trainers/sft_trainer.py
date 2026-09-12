@@ -89,7 +89,8 @@ class ROCmSFTTrainer:
             
         self.collator = PackedSequenceCollator(
             pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id
+            eos_token_id=tokenizer.eos_token_id,
+            use_block_attention=True
         )
         
         # Sampler
