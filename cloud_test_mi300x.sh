@@ -213,103 +213,11 @@ print(f'Status final: {status_final}')
 print('TunableOp test: PASSED')
 " 2>&1 | tee "$LOGDIR/09_tunableop.log" || true
 
-# ── PHASE 10: Real LLM Training (TinyLlama) ────────────────────────────────
+# ── PHASE 10: MI300X Benchmark (TinyLlama-1.1B) ──────────────────────────
 echo ""
-echo "===== PHASE 10: Real LLM Training ====="
-python3 -c "
-import torch
-import torch.nn as nn
-import time
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from rocm_qlora import quantize_model, enable_all_kernels
-
-if not torch.cuda.is_available():
-    print('SKIP: No CUDA device available')
-    exit(0)
-
-device = torch.device('cuda')
-print(f'GPU: {torch.cuda.get_device_name(0)}')
-print(f'VRAM total: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB')
-
-# Step 1: Load small model (GPT-2, 124M params — fast download)
-print('\n[Step 1] Loading sshleifer/tiny-gpt2...')
-model_name = 'sshleifer/tiny-gpt2'
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-tokenizer.pad_token = tokenizer.eos_token
-model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16)
-print(f'Model loaded: {model.num_parameters():,} params')
-
-# Step 2: Quantize + LoRA
-print('\n[Step 2] Quantizing with NF4 + LoRA...')
-model = quantize_model(model, bits=4, lora_r=16, lora_alpha=32,
-                       target_modules=['c_attn', 'c_proj'])
-n = enable_all_kernels(model)
-print(f'Enabled kernels: {n}')
-
-total_params = sum(p.numel() for p in model.parameters())
-trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print(f'Total params: {total_params:,}')
-print(f'Trainable params: {trainable_params:,} ({100*trainable_params/total_params:.2f}%)')
-
-# Step 3: Move to GPU
-print('\n[Step 3] Moving to GPU...')
-model = model.to(device)
-print(f'VRAM after load: {torch.cuda.memory_allocated() / 1e9:.3f} GB')
-
-# Step 4: Prepare training data
-print('\n[Step 4] Preparing training data...')
-texts = [
-    'The quick brown fox jumps over the lazy dog. The fox was clever and fast.',
-    'Machine learning is a subset of artificial intelligence that focuses on patterns.',
-    'AMD ROCm is an open-source platform for GPU computing on AMD hardware.',
-    'QLORA enables efficient fine-tuning of large language models with minimal memory.',
-    'The transformer architecture revolutionized natural language processing tasks.',
-]
-encodings = tokenizer(texts, return_tensors='pt', padding=True, truncation=True,
-                      max_length=64)
-encodings = {k: v.to(device) for k, v in encodings.items()}
-
-# Step 5: Train for 3 steps
-print('\n[Step 5] Training 3 steps...')
-optimizer = torch.optim.AdamW(
-    [p for p in model.parameters() if p.requires_grad],
-    lr=2e-4, weight_decay=0.01
-)
-
-model.train()
-losses = []
-start = time.time()
-
-for step in range(3):
-    optimizer.zero_grad()
-    outputs = model(**encodings, labels=encodings['input_ids'])
-    loss = outputs.loss
-    loss.backward()
-    optimizer.step()
-    losses.append(loss.item())
-    print(f'  Step {step+1}/3 - Loss: {loss.item():.4f} - '
-          f'VRAM: {torch.cuda.memory_allocated() / 1e9:.3f} GB')
-
-elapsed = time.time() - start
-tokens_per_sec = (len(texts) * 64 * 3) / elapsed  # approx
-
-print(f'\nTraining complete in {elapsed:.1f}s')
-print(f'Approx tokens/sec: {tokens_per_sec:.0f}')
-print(f'Loss curve: {losses[0]:.4f} -> {losses[-1]:.4f}')
-
-# Step 6: Inference test
-print('\n[Step 6] Inference test...')
-model.eval()
-prompt = tokenizer('AMD MI300X is', return_tensors='pt').to(device)
-with torch.no_grad():
-    generated = model.generate(**prompt, max_new_tokens=20, do_sample=False)
-response = tokenizer.decode(generated[0], skip_special_tokens=True)
-print(f'Generated: {response}')
-
-print('\n' + '='*50)
-print('REAL LLM TRAINING: PASSED')
-print('='*50)
-" 2>&1 | tee "$LOGDIR/10_llm_training.log" || true
+echo "===== PHASE 10: MI300X Benchmark ====="
+echo "Training TinyLlama-1.1B on Alpaca (4 configs x 10 epochs)"
+python3 demo_bench_mi300x.py 2>&1 | tee "$LOGDIR/10_benchmark.log" || true
 
 # ── DONE ────────────────────────────────────────────────────────────────────
 echo ""
