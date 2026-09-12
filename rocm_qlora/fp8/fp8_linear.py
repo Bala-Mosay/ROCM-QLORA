@@ -15,6 +15,50 @@ from typing import Dict, Any, Tuple, Optional
 from rocm_qlora.fp8.fp8_config import detect_fp8_support, FP8Config, get_fp8_dtype, get_fp8_recipe
 from rocm_qlora.lora.lora_layer import LoRALinear
 
+
+class _FP8LinearFunc(torch.autograd.Function):
+    """Custom autograd for FP8 matmul: FP8 forward, BF16 backward.
+    
+    In QLoRA the base weight is frozen, so only grad_x (dgrad) is needed
+    in backward — grad_w is not computed.
+    """
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor, w_fp16: torch.Tensor, bias: Optional[torch.Tensor]) -> torch.Tensor:
+        ctx.save_for_backward(w_fp16)
+        ctx.has_bias = bias is not None
+        original_shape = x.shape
+
+        try:
+            f8_dtype = get_fp8_dtype("e4m3")
+            # Per-tensor scaling: absmax / 448.0 (max E4M3 value)
+            w_scale = torch.tensor(w_fp16.abs().max().item() / 448.0, dtype=torch.float32, device=x.device)
+            w_f8 = (w_fp16 / w_scale).to(f8_dtype)
+
+            x_2d = x.reshape(-1, x.shape[-1]) if x.dim() > 2 else x
+            x_scale = torch.tensor(x_2d.abs().max().item() / 448.0, dtype=torch.float32, device=x.device)
+            x_f8 = (x_2d / x_scale).to(f8_dtype)
+
+            out = torch._scaled_mm(x_f8, w_f8.t(), scale_a=x_scale, scale_b=w_scale, out_dtype=x.dtype)
+            out = out.reshape(*original_shape[:-1], -1)
+            ctx.fp8_used = True
+        except RuntimeError:
+            # FP8 GEMM not supported — fall back to BF16
+            out = F.linear(x, w_fp16)
+            ctx.fp8_used = False
+
+        if bias is not None:
+            out = out + bias
+
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        w_fp16, = ctx.saved_tensors
+        # Base weight is frozen — only grad_x needed
+        grad_x = grad_output @ w_fp16
+        return grad_x, None, None
+
 class FP8LinearWrapper(nn.Module):
     """
     Wraps LoRALinear to use FP8 compute while keeping quantized storage.
@@ -43,10 +87,7 @@ class FP8LinearWrapper(nn.Module):
                 return self.base(x)
         
         elif self.backend == "native":
-            # torch._scaled_mm on ROCm requires BOTH inputs to be float8.
-            # We dequantize the base weight, then quantize both x and w to FP8.
-            
-            # 1. Base Weight (QuantLinear) -> FP16
+            # FP8 base matmul (autograd-friendly) + BF16 LoRA
             from rocm_qlora.quantization.quant_ops import dequantize_int8, dequantize_int4
             ql = self.base.base_layer
             if ql.use_double_quant:
@@ -57,39 +98,11 @@ class FP8LinearWrapper(nn.Module):
                 w_fp16 = dequantize_int8(ql.weight_quant, ql.weight_scales, ql.block_size).view(ql.original_shape).to(x.dtype)
             else:
                 w_fp16 = dequantize_int4(ql.weight_quant, ql.weight_scales, ql.block_size).view(ql.original_shape).to(x.dtype)
-            
-            # 2. Cast BOTH x and w to FP8 with per-tensor scaling
-            f8_dtype = get_fp8_dtype(self.config.forward_dtype)
-            # Per-tensor scaling: scale = absmax / 448.0 (max E4M3 representable value)
-            w_scale = torch.tensor(w_fp16.abs().max().item() / 448.0, dtype=torch.float32, device=x.device)
-            w_f8 = (w_fp16 / w_scale).to(f8_dtype)
-            
-            # 3. Scaled Matmul (torch._scaled_mm requires 2D inputs)
-            try:
-                if hasattr(torch, '_scaled_mm'):
-                    original_shape = x.shape
-                    if x.dim() > 2:
-                        x_2d = x.reshape(-1, x.shape[-1])
-                    else:
-                        x_2d = x
-                    
-                    x_scale = torch.tensor(x_2d.abs().max().item() / 448.0, dtype=torch.float32, device=x.device)
-                    x_f8 = (x_2d / x_scale).to(f8_dtype)
-                    
-                    base_out = torch._scaled_mm(x_f8, w_f8.t(), scale_a=x_scale, scale_b=w_scale, out_dtype=x.dtype)
-                    base_out = base_out.reshape(*original_shape[:-1], -1)
-                else:
-                    base_out = F.linear(x, w_fp16)
-            except RuntimeError:
-                # FP8 GEMM not supported — fall back to BF16 matmul
-                base_out = F.linear(x, w_fp16)
-            
-            # 4. Add Bias and LoRA
-            if ql.bias is not None:
-                base_out = base_out + ql.bias.to(x.dtype)
-            
-            # LoRA contribution (always in BF16/FP16)
-            # result = base_out + (x @ A.T @ B.T * scaling)
+
+            # FP8 forward via custom autograd (FP8 fwd, BF16 bwd)
+            base_out = _FP8LinearFunc.apply(x, w_fp16, ql.bias)
+
+            # LoRA contribution (always in BF16, fully differentiable)
             lora_out = self.base.lora_dropout(x) @ self.base.lora_A.t().to(x.dtype) @ self.base.lora_B.t().to(x.dtype) * self.base.scaling
             return base_out + lora_out.to(base_out.dtype)
 
