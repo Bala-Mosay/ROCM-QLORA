@@ -235,24 +235,25 @@ __global__ void int4_dequant_matmul_kernel(
                         }
                     }
 
-                    // Pack fragments into uint32 for MFMA
-                    // __builtin_amdgcn_mfma_f32_16x16x16f16(a, b, c, cbsz, abid, blgp)
-                    // Signature: uint32_t a, uint32_t b, float4 c, int, int, int
-                    uint32_t a_packed[2];
-                    a_packed[0] = (*(uint16_t*)&a_frag[0]) | ((*(uint16_t*)&a_frag[1]) << 16);
-                    a_packed[1] = (*(uint16_t*)&a_frag[2]) | ((*(uint16_t*)&a_frag[3]) << 16);
+                    // Pack fragments into half4 vectors for MFMA
+                    // __builtin_amdgcn_mfma_f32_16x16x16f16 expects
+                    // ext_vector_t<fp16_t, 4> for A and B, ext_vector_t<float, 4> for C
+                    // Each thread provides 4 FP16 values packed as a single half4 vector
+                    __attribute__((ext_vector_type(4))) half a_vec;
+                    a_vec.x = a_frag[0];
+                    a_vec.y = a_frag[1];
+                    a_vec.z = a_frag[2];
+                    a_vec.w = a_frag[3];
 
-                    uint32_t b_packed[2];
-                    b_packed[0] = (*(uint16_t*)&b_frag[0]) | ((*(uint16_t*)&b_frag[1]) << 16);
-                    b_packed[1] = (*(uint16_t*)&b_frag[2]) | ((*(uint16_t*)&b_frag[3]) << 16);
+                    __attribute__((ext_vector_type(4))) half b_vec;
+                    b_vec.x = b_frag[0];
+                    b_vec.y = b_frag[1];
+                    b_vec.z = b_frag[2];
+                    b_vec.w = b_frag[3];
 
-                    // MFMA: first pair of fragments
+                    // MFMA: 16x16x16f16 — one call per K-step
                     acc_vec = __builtin_amdgcn_mfma_f32_16x16x16f16(
-                        a_packed[0], b_packed[0], acc_vec, 0, 0, 0
-                    );
-                    // MFMA: second pair of fragments (accumulates into same result)
-                    acc_vec = __builtin_amdgcn_mfma_f32_16x16x16f16(
-                        a_packed[1], b_packed[1], acc_vec, 0, 0, 0
+                        a_vec, b_vec, acc_vec, 0, 0, 0
                     );
                 }
                 // Store accumulated result (4 elements from this thread's MFMA contribution)
