@@ -25,13 +25,13 @@ else
     git clone https://github.com/Bala-Mosay/ROCM-QLORA.git 2>&1 | tail -3
     cd ROCM-QLORA
 fi
-pip install -e ".[dev]" 2>&1 | tail -5 | tee "$LOGDIR/01_install.log"
+pip3 install --break-system-packages -e ".[dev]" 2>&1 | tail -5 | tee "$LOGDIR/01_install.log"
 echo "Setup complete: $(date)" | tee -a "$LOGDIR/01_install.log"
 
 # ── PHASE 2: GPU + ROCm Detection ───────────────────────────────────────────
 echo ""
 echo "===== PHASE 2: GPU + ROCm Detection ====="
-python -c "
+python3 -c "
 import torch
 print('='*50)
 print('SYSTEM INFO')
@@ -58,7 +58,7 @@ print('='*50)
 # ── PHASE 3: Full Pytest Suite ──────────────────────────────────────────────
 echo ""
 echo "===== PHASE 3: Full Pytest Suite (212 tests) ====="
-python -m pytest tests/ -v --tb=short 2>&1 | tee "$LOGDIR/03_pytest.log" || true
+python3 -m pytest tests/ -v --tb=short 2>&1 | tee "$LOGDIR/03_pytest.log" || true
 echo ""
 echo "Pytest complete: $(date)" | tee -a "$LOGDIR/03_pytest.log"
 
@@ -67,7 +67,7 @@ echo ""
 echo "===== PHASE 4: Smoke Tests ====="
 for script in smoke_test.py smoke_test_v3.py smoke_test_v4.py smoke_test_v5.py; do
     echo "--- $script ---"
-    python "$script" 2>&1 | tee -a "$LOGDIR/04_smoke_tests.log" || true
+    python3 "$script" 2>&1 | tee -a "$LOGDIR/04_smoke_tests.log" || true
     echo ""
 done
 echo "Smoke tests complete: $(date)" | tee -a "$LOGDIR/04_smoke_tests.log"
@@ -75,7 +75,7 @@ echo "Smoke tests complete: $(date)" | tee -a "$LOGDIR/04_smoke_tests.log"
 # ── PHASE 5: GPU Training Test ──────────────────────────────────────────────
 echo ""
 echo "===== PHASE 5: GPU Training Test ====="
-python -c "
+python3 -c "
 import torch
 import torch.nn as nn
 from rocm_qlora import quantize_model, enable_all_kernels
@@ -118,7 +118,7 @@ print('GPU training test: PASSED')
 # ── PHASE 6: Merge/Unmerge on GPU ──────────────────────────────────────────
 echo ""
 echo "===== PHASE 6: Merge/Unmerge on GPU ====="
-python -c "
+python3 -c "
 import torch
 import torch.nn as nn
 from rocm_qlora import quantize_model
@@ -157,7 +157,7 @@ print(f'Merge/Unmerge test: {status}')
 # ── PHASE 7: HIP vs Triton Benchmark ────────────────────────────────────────
 echo ""
 echo "===== PHASE 7: HIP vs Triton Benchmark ====="
-python -c "
+python3 -c "
 from rocm_qlora.hip_kernels import benchmark_hip_vs_triton, is_hip_kernel_available
 
 print(f'HIP kernels available: {is_hip_kernel_available()}')
@@ -173,7 +173,7 @@ for size in [256, 512, 1024, 2048]:
 # ── PHASE 8: FP8 Detection ──────────────────────────────────────────────────
 echo ""
 echo "===== PHASE 8: FP8 Support Detection ====="
-python -c "
+python3 -c "
 from rocm_qlora.fp8 import detect_fp8_support, FP8Config
 
 info = detect_fp8_support()
@@ -192,7 +192,7 @@ print(f'  fallback_dtype: {config.fallback_dtype}')
 # ── PHASE 9: TunableOp ──────────────────────────────────────────────────────
 echo ""
 echo "===== PHASE 9: TunableOp Test ====="
-python -c "
+python3 -c "
 from rocm_qlora.profiling import enable_tunableop, disable_tunableop, get_tunableop_status
 
 status_before = get_tunableop_status()
@@ -216,7 +216,7 @@ print('TunableOp test: PASSED')
 # ── PHASE 10: Real LLM Training (TinyLlama) ────────────────────────────────
 echo ""
 echo "===== PHASE 10: Real LLM Training ====="
-python -c "
+python3 -c "
 import torch
 import torch.nn as nn
 import time
