@@ -69,9 +69,14 @@ class FP8LinearWrapper(nn.Module):
             # 3. Scaled Matmul (Conceptual fallback if scaled_mm unavailable)
             if hasattr(torch, '_scaled_mm'):
                 # ROCm 6.2+ supports this
+                # torch._scaled_mm requires 2D inputs — reshape if needed
+                original_shape = x_f8.shape
+                if x_f8.dim() > 2:
+                    x_f8 = x_f8.reshape(-1, x_f8.shape[-1])
                 scale_x = torch.tensor([1.0], device=x.device)
                 scale_w = torch.tensor([1.0], device=x.device)
                 base_out = torch._scaled_mm(x_f8, w_f8.t(), scale_x, scale_w, out_dtype=x.dtype)
+                base_out = base_out.reshape(*original_shape[:-1], -1)
             else:
                 # Fallback to standard matmul if scaled_mm missing in this build
                 base_out = F.linear(x_f8.to(x.dtype), w_f8.to(x.dtype))
