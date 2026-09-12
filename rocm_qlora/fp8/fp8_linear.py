@@ -67,19 +67,25 @@ class FP8LinearWrapper(nn.Module):
             w_f8 = w_fp16.to(f8_dtype)
             
             # 3. Scaled Matmul (Conceptual fallback if scaled_mm unavailable)
-            if hasattr(torch, '_scaled_mm'):
-                # ROCm 6.2+ supports this
-                # torch._scaled_mm requires 2D inputs — reshape if needed
-                original_shape = x_f8.shape
-                if x_f8.dim() > 2:
-                    x_f8 = x_f8.reshape(-1, x_f8.shape[-1])
-                scale_x = torch.tensor([1.0], device=x.device)
-                scale_w = torch.tensor([1.0], device=x.device)
-                base_out = torch._scaled_mm(x_f8, w_f8.t(), scale_x, scale_w, out_dtype=x.dtype)
-                base_out = base_out.reshape(*original_shape[:-1], -1)
-            else:
-                # Fallback to standard matmul if scaled_mm missing in this build
-                base_out = F.linear(x_f8.to(x.dtype), w_f8.to(x.dtype))
+            try:
+                if hasattr(torch, '_scaled_mm'):
+                    # ROCm 6.2+ supports this
+                    # torch._scaled_mm requires 2D inputs — reshape if needed
+                    original_shape = x_f8.shape
+                    if x_f8.dim() > 2:
+                        x_f8_2d = x_f8.reshape(-1, x_f8.shape[-1])
+                    else:
+                        x_f8_2d = x_f8
+                    scale_x = torch.tensor([1.0], device=x.device)
+                    scale_w = torch.tensor([1.0], device=x.device)
+                    base_out = torch._scaled_mm(x_f8_2d, w_f8.t(), scale_x, scale_w, out_dtype=x.dtype)
+                    base_out = base_out.reshape(*original_shape[:-1], -1)
+                else:
+                    # Fallback to standard matmul if scaled_mm missing in this build
+                    base_out = F.linear(x_f8.to(x.dtype), w_f8.to(x.dtype))
+            except RuntimeError:
+                # FP8 GEMM not supported by HIPBLAS on this hardware — fall back to BF16
+                base_out = F.linear(x.to(w_fp16.dtype), w_fp16)
             
             # 4. Add Bias and LoRA
             if ql.bias is not None:
