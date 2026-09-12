@@ -135,12 +135,12 @@ class QuantLinear(nn.Module):
                 return hip_dequant_int8_matmul(
                     x, self.weight_quant, self.weight_scales,
                     self.bias, self.block_size
-                )
+                ).to(x.dtype)
             else:
                 return hip_dequant_int4_matmul(
                     x, self.weight_quant, self.weight_scales,
                     self.bias, self.block_size
-                )
+                ).to(x.dtype)
 
         if self.use_triton_kernel and x.is_cuda:
             from rocm_qlora.kernels import fused_dequant_int8_matmul, fused_dequant_nf4_matmul
@@ -148,12 +148,12 @@ class QuantLinear(nn.Module):
                 return fused_dequant_int8_matmul(
                     x, self.weight_quant, self.weight_scales,
                     self.bias, self.block_size
-                )
+                ).to(x.dtype)
             else:
                 return fused_dequant_nf4_matmul(
                     x, self.weight_quant, self.weight_scales,
                     self.bias, self.block_size
-                )
+                ).to(x.dtype)
 
         # 1. Dequantize based on bit depth
         if self.use_double_quant and self.bits == 4:
