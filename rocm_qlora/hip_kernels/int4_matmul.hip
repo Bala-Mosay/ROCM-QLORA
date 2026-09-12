@@ -28,23 +28,24 @@
 
 // NF4 lookup table (16 values, matching Python NF4_VALUES)
 // # NOTE: stored in __constant__ memory for fast broadcast access
-__constant__ __half nf4_table[16] = {
-    __float2half(-1.0f),
-    __float2half(-0.6961928009986877f),
-    __float2half(-0.5250730514526367f),
-    __float2half(-0.39491748809814453f),
-    __float2half(-0.28444138169288635f),
-    __float2half(-0.18477343022823334f),
-    __float2half(-0.09105003625154495f),
-    __float2half(0.0f),
-    __float2half(0.07958029955625534f),
-    __float2half(0.16093020141124725f),
-    __float2half(0.24611230194568634f),
-    __float2half(0.33791524171829224f),
-    __float2half(0.44070982933044434f),
-    __float2half(0.5626170039176941f),
-    __float2half(0.7229568362236023f),
-    __float2half(1.0f),
+// Using _Float16 literals for compile-time initialization
+__constant__ _Float16 nf4_table[16] = {
+    (_Float16)(-1.0f),
+    (_Float16)(-0.6961928009986877f),
+    (_Float16)(-0.5250730514526367f),
+    (_Float16)(-0.39491748809814453f),
+    (_Float16)(-0.28444138169288635f),
+    (_Float16)(-0.18477343022823334f),
+    (_Float16)(-0.09105003625154495f),
+    (_Float16)(0.0f),
+    (_Float16)(0.07958029955625534f),
+    (_Float16)(0.16093020141124725f),
+    (_Float16)(0.24611230194568634f),
+    (_Float16)(0.33791524171829224f),
+    (_Float16)(0.44070982933044434f),
+    (_Float16)(0.5626170039176941f),
+    (_Float16)(0.7229568362236023f),
+    (_Float16)(1.0f),
 };
 
 // --- Device function: unpack two INT4 nibbles from a packed uint8 ---
