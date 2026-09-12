@@ -235,25 +235,25 @@ __global__ void int4_dequant_matmul_kernel(
                         }
                     }
 
-                    // Pack fragments into half4 vectors for MFMA
+                    // Pack fragments into ext_vector_t<_Float16, 4> for MFMA
                     // __builtin_amdgcn_mfma_f32_16x16x16f16 expects
-                    // ext_vector_t<fp16_t, 4> for A and B, ext_vector_t<float, 4> for C
-                    // Each thread provides 4 FP16 values packed as a single half4 vector
-                    __attribute__((ext_vector_type(4))) half a_vec;
-                    a_vec.x = a_frag[0];
-                    a_vec.y = a_frag[1];
-                    a_vec.z = a_frag[2];
-                    a_vec.w = a_frag[3];
+                    // ext_vector_t<_Float16, 4> for A and B, ext_vector_t<float, 4> for C
+                    // Use union to convert __half[4] -> ext_vector_t<_Float16, 4>
+                    union { __attribute__((ext_vector_type(4))) _Float16 vec; _Float16 arr[4]; } a_u;
+                    a_u.arr[0] = a_frag[0];
+                    a_u.arr[1] = a_frag[1];
+                    a_u.arr[2] = a_frag[2];
+                    a_u.arr[3] = a_frag[3];
 
-                    __attribute__((ext_vector_type(4))) half b_vec;
-                    b_vec.x = b_frag[0];
-                    b_vec.y = b_frag[1];
-                    b_vec.z = b_frag[2];
-                    b_vec.w = b_frag[3];
+                    union { __attribute__((ext_vector_type(4))) _Float16 vec; _Float16 arr[4]; } b_u;
+                    b_u.arr[0] = b_frag[0];
+                    b_u.arr[1] = b_frag[1];
+                    b_u.arr[2] = b_frag[2];
+                    b_u.arr[3] = b_frag[3];
 
                     // MFMA: 16x16x16f16 — one call per K-step
                     acc_vec = __builtin_amdgcn_mfma_f32_16x16x16f16(
-                        a_vec, b_vec, acc_vec, 0, 0, 0
+                        a_u.vec, b_u.vec, acc_vec, 0, 0, 0
                     );
                 }
                 // Store accumulated result (4 elements from this thread's MFMA contribution)
