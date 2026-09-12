@@ -18,8 +18,13 @@ echo "=============================================="
 # ── PHASE 1: Setup ──────────────────────────────────────────────────────────
 echo ""
 echo "===== PHASE 1: Setup ====="
-git clone https://github.com/Bala-Mosay/ROCM-QLORA.git 2>&1 | tail -3
-cd ROCM-QLORA
+if [ -d ".git" ]; then
+    echo "Repo exists, pulling latest..."
+    git pull origin main 2>&1 | tail -3
+else
+    git clone https://github.com/Bala-Mosay/ROCM-QLORA.git 2>&1 | tail -3
+    cd ROCM-QLORA
+fi
 pip install -e ".[dev]" 2>&1 | tail -5 | tee "$LOGDIR/01_install.log"
 echo "Setup complete: $(date)" | tee -a "$LOGDIR/01_install.log"
 
