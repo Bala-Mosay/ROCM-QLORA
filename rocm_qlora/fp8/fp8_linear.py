@@ -40,9 +40,14 @@ class _FP8LinearFunc(torch.autograd.Function):
             x_f8 = (x_2d / x_scale).to(f8_dtype)
 
             out = torch._scaled_mm(x_f8, w_f8.t(), scale_a=x_scale, scale_b=w_scale, out_dtype=x.dtype)
-            out = out.reshape(*original_shape[:-1], -1)
-            ctx.fp8_used = True
-        except RuntimeError:
+            # _scaled_mm on ROCm with fnuz silently returns NaN — detect and fallback
+            if out.isnan().any():
+                out = F.linear(x, w_fp16)
+                ctx.fp8_used = False
+            else:
+                out = out.reshape(*original_shape[:-1], -1)
+                ctx.fp8_used = True
+        except (RuntimeError, NotImplementedError):
             # FP8 GEMM not supported — fall back to BF16
             out = F.linear(x, w_fp16)
             ctx.fp8_used = False
