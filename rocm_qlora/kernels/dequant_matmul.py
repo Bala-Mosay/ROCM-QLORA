@@ -100,7 +100,7 @@ def dequant_int8_matmul_kernel(
         bias = tl.load(bias_ptr + offs_bn)[None, :]
         acc += bias
 
-    c = acc.to(tl.float16)
+    c = acc.to(tl.bfloat16)
 
     # Store results
     offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -191,7 +191,7 @@ def dequant_nf4_matmul_kernel(
         bias = tl.load(bias_ptr + offs_bn)[None, :]
         acc += bias
 
-    c = acc.to(tl.float16)
+    c = acc.to(tl.bfloat16)
     
     offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_cn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -225,7 +225,7 @@ def _triton_dequant_int8_matmul(x, w_int8, scales, bias, block_size, cfg):
     M, _ = x_2d.shape
     N, _ = w_int8.shape
     
-    output = torch.empty((M, N), device=x.device, dtype=torch.float16)
+    output = torch.empty((M, N), device=x.device, dtype=x.dtype)
     
     grid = lambda META: (
         triton.cdiv(M, META['BLOCK_M']) * triton.cdiv(N, META['BLOCK_N']),
@@ -261,7 +261,7 @@ def _triton_dequant_nf4_matmul(x, w_packed, scales, bias, block_size, cfg):
         N = w_packed.shape[0]
         w_packed_2d = w_packed
     
-    output = torch.empty((M, N), device=x.device, dtype=torch.float16)
+    output = torch.empty((M, N), device=x.device, dtype=x.dtype)
     
     grid = lambda META: (
         triton.cdiv(M, META['BLOCK_M']) * triton.cdiv(N, META['BLOCK_N']),

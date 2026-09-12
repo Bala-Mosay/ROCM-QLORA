@@ -73,7 +73,7 @@ def nf4_dequant_kernel(
     scale_idx = offs // block_size
     scales = tl.load(scales_ptr + scale_idx, mask=mask, other=1.0)
     
-    dequantized = vals.to(tl.float16) * scales.to(tl.float16)
+    dequantized = vals.to(tl.float32) * scales.to(tl.float32)
     
     # Store result
     tl.store(out_ptr + offs, dequantized, mask=mask)
@@ -94,7 +94,7 @@ def dequantize_nf4_triton(
         return dequantize_int4(packed, scales, block_size)
 
     num_elements = packed.numel() * 2
-    out = torch.empty(num_elements, device=packed.device, dtype=torch.float16)
+    out = torch.empty(num_elements, device=packed.device, dtype=torch.bfloat16)
     
     # Use config for block size if needed, or a fixed reasonable size for this simple kernel
     # Since this is a 1D element-wise operation, BLOCK_SIZE=1024 is usually good.
