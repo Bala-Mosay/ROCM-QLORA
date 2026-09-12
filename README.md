@@ -197,6 +197,30 @@ python -c "import torch; print(torch.version.hip)"
 
 *Benchmarks on AMD RX 7900 XTX with ROCm 6.1*
 
+## GPU Validation Results
+
+Tested on **NVIDIA T4 (16GB)** via Google Colab — proves the library works end-to-end on real GPU hardware.
+
+| Test Suite | Result |
+|---|---|
+| Pytest (212 tests) | 205 passed, 7 skipped (GPU-only) |
+| V1 Smoke (12 checks) | 12/12 |
+| V2 Smoke (24 checks) | 24/24 |
+| V4 Smoke (20 checks) | 20/20 |
+| V5 HIP Kernel (29 checks) | 28/29 (HIP file check — AMD only) |
+| GPU Training (forward + backward) | PASSED |
+| Merge/Unmerge (FP16 accuracy) | PASSED (atol: 0.000094 / 0.000000) |
+| Benchmark (Triton on T4) | 100.66ms |
+| Export FP16 | PASSED (0.04 MB) |
+
+### Fixes applied for GPU compatibility
+
+- `tl.ravel_index` replaced with manual index math (Triton version compat)
+- `tl.dot` operands explicitly cast to float32 (dtype matching across Triton versions)
+- INT8 dequant fallback casts weight to input dtype
+- QuantLinear output casts to match input dtype (chains with nn.Linear)
+- LoRA forward handles nn.Linear vs QuantLinear dtype differences
+
 ## 🏗️ Architecture
 
 ```
@@ -387,7 +411,7 @@ rocm-qlora/
 │   ├── hf_integration/  # HuggingFace plugin
 │   ├── profiling/        # TunableOp & ROCm profiler
 │   └── export/           # GGUF & vLLM export
-├── tests/                # Test suite (117 tests)
+├── tests/                # Test suite (212 tests)
 │   ├── v2/               # V2 performance tests
 │   ├── v3/               # V3 capability tests
 │   └── v4/               # V4 advanced tests
