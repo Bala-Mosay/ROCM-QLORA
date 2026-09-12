@@ -93,7 +93,7 @@ class FP8LinearWrapper(nn.Module):
             
             # LoRA contribution (always in BF16/FP16)
             # result = base_out + (x @ A.T @ B.T * scaling)
-            lora_out = self.base.lora_dropout(x) @ self.base.lora_A.t() @ self.base.lora_B.t() * self.base.scaling
+            lora_out = self.base.lora_dropout(x) @ self.base.lora_A.t().to(x.dtype) @ self.base.lora_B.t().to(x.dtype) * self.base.scaling
             return base_out + lora_out.to(base_out.dtype)
 
         else:
