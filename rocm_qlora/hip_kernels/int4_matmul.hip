@@ -183,7 +183,10 @@ __global__ void int4_dequant_matmul_kernel(
                 int local_n = sub_n_base + sn * 16;
 
                 // Accumulate across 4 K-steps (64 / 16 = 4 MFMA reductions)
-                float4 acc_vec = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+                // Use union to match MFMA's ext_vector_t<float, 4> accumulator type
+                union { __attribute__((ext_vector_type(4))) float vec; float arr[4]; } acc_u;
+                acc_u.arr[0] = 0.0f; acc_u.arr[1] = 0.0f;
+                acc_u.arr[2] = 0.0f; acc_u.arr[3] = 0.0f;
 
                 #pragma unroll
                 for (int k_step = 0; k_step < 4; k_step++) {
@@ -252,12 +255,12 @@ __global__ void int4_dequant_matmul_kernel(
                     b_u.arr[3] = b_frag[3];
 
                     // MFMA: 16x16x16f16 — one call per K-step
-                    acc_vec = __builtin_amdgcn_mfma_f32_16x16x16f16(
-                        a_u.vec, b_u.vec, acc_vec, 0, 0, 0
+                    acc_u.vec = __builtin_amdgcn_mfma_f32_16x16x16f16(
+                        a_u.vec, b_u.vec, acc_u.vec, 0, 0, 0
                     );
                 }
                 // Store accumulated result (4 elements from this thread's MFMA contribution)
-                acc[sm][sn] = acc_vec.x + acc_vec.y + acc_vec.z + acc_vec.w;
+                acc[sm][sn] = acc_u.arr[0] + acc_u.arr[1] + acc_u.arr[2] + acc_u.arr[3];
             }
         }
         __syncthreads();
