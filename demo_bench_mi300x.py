@@ -262,14 +262,20 @@ def run_training_config(
         epoch_steps = 0
 
         for step, batch in enumerate(dataloader):
-            batch = {k: v.to(device) for k, v in batch.items()}
+            # Handle both packed (dict) and unpacked (tuple) batches
+            if isinstance(batch, dict):
+                batch = {k: v.to(device) for k, v in batch.items()}
+                labels = batch.get("labels", batch.get("input_ids"))
+            else:
+                batch = tuple(b.to(device) for b in batch)
+                batch = {"input_ids": batch[0], "attention_mask": batch[1], "labels": batch[2]}
+                labels = batch["labels"]
 
             outputs = model(**batch)
             loss = outputs.loss / grad_accum
             loss.backward()
 
             # Count non-ignored tokens for throughput
-            labels = batch.get("labels", batch.get("input_ids"))
             total_tokens += (labels != -100).sum().item()
 
             if (step + 1) % grad_accum == 0:
