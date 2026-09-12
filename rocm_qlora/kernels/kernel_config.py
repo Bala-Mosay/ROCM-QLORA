@@ -18,8 +18,8 @@ class TritonKernelConfig:
 # gfx942 = MI300X (CDNA3), gfx940/gfx941 = MI300A
 # Wavefront=64, native MFMA instructions
 CDNA3_CONFIG = TritonKernelConfig(
-    BLOCK_M=128, BLOCK_N=128, BLOCK_K=64,
-    num_warps=8, num_stages=3, wavefront_size=64
+    BLOCK_M=64, BLOCK_N=64, BLOCK_K=32,
+    num_warps=4, num_stages=2, wavefront_size=64
 )
 
 # CDNA2 (MI250X, MI210) - gfx90a
