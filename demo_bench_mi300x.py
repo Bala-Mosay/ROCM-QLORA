@@ -332,7 +332,7 @@ def print_comparison_table(results: List[BenchResult]):
     """Print a formatted comparison table."""
     print(f"\n{'='*80}")
     print(f"  MI300X BENCHMARK RESULTS — TinyLlama-1.1B on Alpaca ({NUM_EPOCHS} epochs)")
-    print(f"  GPU: {torch.cuda.get_device_name(0)} | VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+    print(f"  GPU: {torch.cuda.get_device_name(0)} | VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     print(f"{'='*80}")
 
     # Header
@@ -382,7 +382,7 @@ def main():
     print("=" * 60)
     print("  rocm-qlora MI300X Benchmark")
     print(f"  {torch.cuda.get_device_name(0)} | "
-          f"{torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB VRAM")
+          f"{torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB VRAM")
     print(f"  PyTorch {torch.__version__} | "
           f"ROCm {torch.version.hip if hasattr(torch.version, 'hip') and torch.version.hip else 'N/A'}")
     print("=" * 60)
@@ -443,7 +443,7 @@ def main():
 
     output = {
         "gpu": torch.cuda.get_device_name(0),
-        "vram_gb": round(torch.cuda.get_device_properties(0).total_mem / 1e9, 1),
+        "vram_gb": round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1),
         "pytorch_version": torch.__version__,
         "rocm_version": torch.version.hip if hasattr(torch.version, 'hip') and torch.version.hip else "N/A",
         "model": MODEL_ID,
