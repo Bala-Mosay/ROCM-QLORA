@@ -318,11 +318,9 @@ class _FusedInt8MatmulFunc(torch.autograd.Function):
         orig_shape = ctx.x_shape
         N, K = w_int8.shape
         # grad_x = grad_output @ W  (W is [N, K], grad_output is [*, N])
-        # F.linear(grad_output, W) = grad_output @ W.T — WRONG for our case
-        # F.linear(grad_output, W.T) = grad_output @ W — CORRECT
         w_fp16 = dequantize_int8(w_int8, scales, block_size).to(grad_output.dtype)
         grad_2d = grad_output.reshape(-1, N)
-        grad_x = F.linear(grad_2d, w_fp16.T)
+        grad_x = torch.mm(grad_2d, w_fp16)
         return grad_x.reshape(*orig_shape[:-1], K), None, None, None, None
 
 
@@ -349,7 +347,7 @@ class _FusedNF4MatmulFunc(torch.autograd.Function):
         # grad_x = grad_output @ W  (W is [N, K], grad_output is [*, N])
         w_fp16 = dequantize_int4(w_packed.flatten(), scales, block_size).reshape(N, K).to(grad_output.dtype)
         grad_2d = grad_output.reshape(-1, N)
-        grad_x = F.linear(grad_2d, w_fp16)
+        grad_x = torch.mm(grad_2d, w_fp16)
         return grad_x.reshape(*orig_shape[:-1], K), None, None, None, None
 
 
