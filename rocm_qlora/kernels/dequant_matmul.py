@@ -234,13 +234,13 @@ def _triton_dequant_int8_matmul(x, w_int8, scales, bias, block_size, cfg):
     x_2d = x.view(-1, K)
     M, _ = x_2d.shape
     N, _ = w_int8.shape
-    
+
     output = torch.empty((M, N), device=x.device, dtype=x.dtype)
-    
+
     grid = lambda META: (
         triton.cdiv(M, META['BLOCK_M']) * triton.cdiv(N, META['BLOCK_N']),
     )
-    
+
     dequant_int8_matmul_kernel[grid](
         x_2d, w_int8, scales, output, bias,
         M, N, K,
@@ -254,12 +254,12 @@ def _triton_dequant_int8_matmul(x, w_int8, scales, bias, block_size, cfg):
         num_warps=cfg.num_warps,
         num_stages=cfg.num_stages,
     )
-    
+
     return output.view(*x.shape[:-1], N)
 
 def _triton_dequant_nf4_matmul(x, w_packed, scales, bias, block_size, cfg):
     from rocm_qlora.kernels.nf4_dequant import NF4_TABLE
-    
+
     K = x.shape[-1]
     x_2d = x.view(-1, K)
     M, _ = x_2d.shape
@@ -270,13 +270,13 @@ def _triton_dequant_nf4_matmul(x, w_packed, scales, bias, block_size, cfg):
     else:
         N = w_packed.shape[0]
         w_packed_2d = w_packed
-    
+
     output = torch.empty((M, N), device=x.device, dtype=x.dtype)
-    
+
     grid = lambda META: (
         triton.cdiv(M, META['BLOCK_M']) * triton.cdiv(N, META['BLOCK_N']),
     )
-    
+
     dequant_nf4_matmul_kernel[grid](
         x_2d, w_packed_2d, scales, output, bias,
         M, N, K,
@@ -291,29 +291,88 @@ def _triton_dequant_nf4_matmul(x, w_packed, scales, bias, block_size, cfg):
         num_warps=cfg.num_warps,
         num_stages=cfg.num_stages,
     )
-    
+
     return output.view(*x.shape[:-1], N)
+
+
+# --- Autograd Functions ---
+# Triton kernels are not differentiable by default. We wrap them in
+# torch.autograd.Function so gradients flow correctly during backward.
+# Forward: Triton fused kernel (fast, low VRAM)
+# Backward: PyTorch dequant + F.linear (correct analytical gradients)
+
+class _FusedInt8MatmulFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, w_int8, scales, bias, block_size):
+        cfg = get_kernel_config()
+        out = _triton_dequant_int8_matmul(x, w_int8, scales, bias, block_size, cfg)
+        ctx.save_for_backward(w_int8, scales)
+        ctx.block_size = block_size
+        ctx.x_shape = x.shape
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        w_int8, scales = ctx.saved_tensors
+        block_size = ctx.block_size
+        orig_shape = ctx.x_shape
+        N, K = w_int8.shape
+        # grad_x = grad_output @ W  (W is [N, K], grad_output is [*, N])
+        # F.linear(grad_output, W) = grad_output @ W.T — WRONG for our case
+        # F.linear(grad_output, W.T) = grad_output @ W — CORRECT
+        w_fp16 = dequantize_int8(w_int8, scales, block_size).to(grad_output.dtype)
+        grad_2d = grad_output.reshape(-1, N)
+        grad_x = F.linear(grad_2d, w_fp16.T)
+        return grad_x.reshape(*orig_shape[:-1], K), None, None, None, None
+
+
+class _FusedNF4MatmulFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, w_packed, scales, bias, block_size):
+        cfg = get_kernel_config()
+        out = _triton_dequant_nf4_matmul(x, w_packed, scales, bias, block_size, cfg)
+        ctx.save_for_backward(w_packed, scales)
+        ctx.block_size = block_size
+        ctx.x_shape = x.shape
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        w_packed, scales = ctx.saved_tensors
+        block_size = ctx.block_size
+        orig_shape = ctx.x_shape
+        K = orig_shape[-1]
+        if w_packed.dim() == 1:
+            N = w_packed.numel() * 2 // K
+        else:
+            N = w_packed.shape[0]
+        # grad_x = grad_output @ W  (W is [N, K], grad_output is [*, N])
+        w_fp16 = dequantize_int4(w_packed.flatten(), scales, block_size).reshape(N, K).to(grad_output.dtype)
+        grad_2d = grad_output.reshape(-1, N)
+        grad_x = F.linear(grad_2d, w_fp16)
+        return grad_x.reshape(*orig_shape[:-1], K), None, None, None, None
+
+
+# --- Public API ---
 
 def fused_dequant_int8_matmul(x, w_int8, scales, bias=None, block_size=64):
     """
     Fused INT8 dequantization and matmul.
-    If Triton is available and input is on GPU, use Triton kernel.
+    If Triton is available and input is on GPU, use Triton kernel with autograd support.
     Otherwise, use PyTorch fallback.
     """
     if TRITON_INSTALLED and x.is_cuda and is_triton_available():
-        cfg = get_kernel_config()
-        return _triton_dequant_int8_matmul(x, w_int8, scales, bias, block_size, cfg)
+        return _FusedInt8MatmulFunc.apply(x, w_int8, scales, bias, block_size)
     else:
         return _fallback_torch_dequant_int8_matmul(x, w_int8, scales, bias, block_size)
 
 def fused_dequant_nf4_matmul(x, w_packed, scales, bias=None, block_size=64):
     """
     Fused NF4 dequantization and matmul.
-    If Triton is available and input is on GPU, use Triton kernel.
+    If Triton is available and input is on GPU, use Triton kernel with autograd support.
     Otherwise, use PyTorch fallback.
     """
     if TRITON_INSTALLED and x.is_cuda and is_triton_available():
-        cfg = get_kernel_config()
-        return _triton_dequant_nf4_matmul(x, w_packed, scales, bias, block_size, cfg)
+        return _FusedNF4MatmulFunc.apply(x, w_packed, scales, bias, block_size)
     else:
         return _fallback_torch_dequant_nf4_matmul(x, w_packed, scales, bias, block_size)
