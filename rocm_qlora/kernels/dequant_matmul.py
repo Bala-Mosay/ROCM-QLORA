@@ -89,10 +89,15 @@ def dequant_int8_matmul_kernel(
         # Dequantize B
         b_fp32 = b_int8.to(tl.float32) * scales.to(tl.float32)
         
-        # Matrix multiply — both operands must be same dtype for tl.dot.
-        # input_precision="ieee" forces full FP32 on gfx942 (MI300X),
-        # bypassing default xf32/TF32 truncation that destroys gradient signals.
-        acc += tl.dot(a.to(tl.float32), b_fp32, input_precision="ieee")
+        # Manual FP32 matmul accumulation.
+        # NOTE: tl.dot on gfx942 (triton-rocm 3.7.1) is broken —
+        # input_precision="ieee" has no effect and results are garbage.
+        # Manual accumulation via tl.sum is ~2x slower but numerically correct.
+        # a: [BLOCK_M, BLOCK_K], b_fp32: [BLOCK_K, BLOCK_N]
+        # Use masking to zero out-of-bounds K positions
+        k_valid = ( offs_k[None, :] < K - k * BLOCK_K ).to(tl.float32)  # [1, BLOCK_K]
+        a_valid = a.to(tl.float32) * k_valid  # [BLOCK_M, BLOCK_K]
+        acc += tl.sum(a_valid[:, :, None] * b_fp32[None, :, :], axis=1)
         
         # Advance pointers
         a_ptrs += BLOCK_K * stride_ak
@@ -185,7 +190,10 @@ def dequant_nf4_matmul_kernel(
         
         b_fp32 = b_val.to(tl.float32) * scales.to(tl.float32)
         
-        acc += tl.dot(a.to(tl.float32), b_fp32, input_precision="ieee")
+        # Manual FP32 matmul accumulation (same reason as INT8 kernel).
+        k_valid = ( offs_k[None, :] < K - k * BLOCK_K ).to(tl.float32)
+        a_valid = a.to(tl.float32) * k_valid
+        acc += tl.sum(a_valid[:, :, None] * b_fp32[None, :, :], axis=1)
         
         a_ptrs += BLOCK_K * stride_ak
 
