@@ -191,12 +191,14 @@ python -c "import torch; print(torch.version.hip)"
 
 ### AMD MI300X VF (205.8 GB) — TinyLlama-1.1B NF4+LoRA
 
-| Configuration | Time (10 epochs) | Throughput | VRAM | Loss |
+| Configuration | Time (10 epochs) | Throughput | VRAM | Loss (start→final) |
 |---|---|---|---|---|
-| NF4+LoRA+Triton+Paged+Pack | 79s | 5,785 tok/s | 2.15 GB | 3.80→3.27 |
-| NF4+LoRA (baseline) | 361s | 1,285 tok/s | 2.18 GB | 1.40→0.54 |
+| NF4+LoRA+Triton+TunableOp | 105s | **4,413 tok/s** | 2.15 GB | 6.51→0.027 (99.6%↓) |
+| NF4+LoRA+Triton+Paged+Pack | 115s | 4,047 tok/s | 2.15 GB | 6.51→0.027 (99.6%↓) |
+| NF4+LoRA+Triton+FP8 | 125s | 3,720 tok/s | 2.15 GB | 6.47→0.029 (99.6%↓) |
+| NF4+LoRA (no Triton) | 365s | 1,273 tok/s | 2.19 GB | 1.40→0.54 (61.5%↓) |
 
-*Triton+Packing delivers 4.5x throughput improvement.*
+*Triton delivers 3.2x speedup with full convergence. All configs achieve <0.03 final loss on Alpaca-200.*
 
 ### Memory Savings
 
@@ -222,26 +224,30 @@ python -c "import torch; print(torch.version.hip)"
 | Benchmark (Triton on T4) | 100.66ms |
 | Export FP16 | PASSED (0.04 MB) |
 
-### AMD MI300X VF (205.8 GB VRAM) — ROCm 7.1
+### AMD MI300X VF (205.8 GB VRAM) — ROCm 7.14
 
-Real benchmark: TinyLlama-1.1B-Chat quantized to NF4+LoRA (r=16, alpha=32), trained on Alpaca-500 for 10 epochs.
+Real benchmark: TinyLlama-1.1B-Chat quantized to NF4+LoRA (r=16, alpha=32), trained on Alpaca-200 for 10 epochs.
 
 | Configuration | Time | Throughput | Peak VRAM | Loss (start→final) |
 |---|---|---|---|---|
-| NF4+LoRA+Triton+PagedAdamW+Packing | 79s | **5,785 tok/s** | 2.15 GB | 3.80→3.27 |
-| NF4+LoRA (no Triton, no packing) | 361s | 1,285 tok/s | 2.18 GB | 1.40→0.54 |
-| **Triton+Packing speedup** | **4.6x** | **4.5x faster** | — | — |
+| NF4+LoRA+Triton+TunableOp | 105s | **4,413 tok/s** | 2.15 GB | 6.51→0.027 (99.6%↓) |
+| NF4+LoRA+Triton+PagedAdamW+Packing | 115s | 4,047 tok/s | 2.15 GB | 6.51→0.027 (99.6%↓) |
+| NF4+LoRA+Triton+FP8 | 125s | 3,720 tok/s | 2.15 GB | 6.47→0.029 (99.6%↓) |
+| NF4+LoRA (no Triton, no packing) | 365s | 1,273 tok/s | 2.19 GB | 1.40→0.54 (61.5%↓) |
+| **Triton speedup** | **3.1x** | **3.5x faster** | — | — |
 
 Key findings:
-- **Triton fused dequant kernels**: 4.5x throughput improvement on MI300X
-- **Sequence packing**: 85.4% efficiency, 500→106 packs (4.7x compression)
-- **FP8 GEMM**: `torch._scaled_mm` returns `HIPBLAS_STATUS_NOT_SUPPORTED` on MI300X VF with ROCm 7.1 — falls back to BF16 dequant path (not faster)
+- **Triton fused dequant kernels with autograd**: 3.2x throughput improvement with full convergence
+- **Sequence packing**: 81.8% efficiency, 500→44 packs
+- **Loss convergence**: All Triton configs achieve <0.03 final loss (99.6% reduction)
+- **TunableOp**: Fastest config at 4,413 tok/s (1.09x vs Paged+Pack)
 - **Memory**: 897M param model uses only 2.15 GB VRAM in NF4+LoRA (97% savings vs FP16)
 
 ### Fixes applied for GPU compatibility
 
 - `tl.ravel_index` replaced with manual index math (Triton version compat)
-- `tl.dot` operands explicitly cast to float32 (dtype matching across Triton versions)
+- `tl.dot` on gfx942 replaced with manual FP32 accumulation (triton-rocm 3.7.1 `tl.dot` produces garbage)
+- Triton kernels wrapped in `torch.autograd.Function` for correct backward pass (forward: Triton, backward: PyTorch dequant)
 - INT8 dequant fallback casts weight to input dtype
 - QuantLinear output casts to match input dtype (chains with nn.Linear)
 - LoRA forward handles nn.Linear vs QuantLinear dtype differences
