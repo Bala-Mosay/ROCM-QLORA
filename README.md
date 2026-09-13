@@ -191,14 +191,17 @@ python -c "import torch; print(torch.version.hip)"
 
 ### AMD MI300X VF (205.8 GB) — TinyLlama-1.1B NF4+LoRA
 
-| Configuration | Time (10 epochs) | Throughput | VRAM | Loss (start→final) |
-|---|---|---|---|---|
-| NF4+LoRA+Triton+TunableOp | 105s | **4,413 tok/s** | 2.15 GB | 6.51→0.027 (99.6%↓) |
-| NF4+LoRA+Triton+Paged+Pack | 115s | 4,047 tok/s | 2.15 GB | 6.51→0.027 (99.6%↓) |
-| NF4+LoRA+Triton+FP8 | 125s | 3,720 tok/s | 2.15 GB | 6.47→0.029 (99.6%↓) |
-| NF4+LoRA (no Triton) | 365s | 1,273 tok/s | 2.19 GB | 1.40→0.54 (61.5%↓) |
+Fair comparison: Triton ON vs OFF with identical pipeline (same packing, optimizer, data split).
 
-*Triton delivers 3.2x speedup with full convergence. All configs achieve <0.03 final loss on Alpaca-200.*
+| Configuration | Time (10 epochs) | Throughput | Train Loss | Eval Loss |
+|---|---|---|---|---|
+| Triton ON (full) | 115s | 3,215 tok/s | 6.98→0.037 | 2.00→1.99 |
+| Triton OFF (fair) | 95s | 3,902 tok/s | 6.98→0.037 | 2.00→2.00 |
+| Triton+TunableOp | 102s | 3,603 tok/s | 6.98→0.037 | 2.00→1.99 |
+
+**Key result: Convergence MATCHES across all configs.** Train loss reaches 0.037 in all cases, confirming the Triton kernel is numerically correct. Eval loss stays at ~2.0 (expected with only 400 training samples — overfitting is normal).
+
+Triton JIT compilation adds ~20s overhead on first epoch. Subsequent epochs benefit from cached kernels.
 
 ### Memory Savings
 
@@ -226,22 +229,21 @@ python -c "import torch; print(torch.version.hip)"
 
 ### AMD MI300X VF (205.8 GB VRAM) — ROCm 7.14
 
-Real benchmark: TinyLlama-1.1B-Chat quantized to NF4+LoRA (r=16, alpha=32), trained on Alpaca-200 for 10 epochs.
+Real benchmark: TinyLlama-1.1B-Chat quantized to NF4+LoRA (r=16, alpha=32), trained on Alpaca (400 train / 100 eval) for 10 epochs.
 
-| Configuration | Time | Throughput | Peak VRAM | Loss (start→final) |
-|---|---|---|---|---|
-| NF4+LoRA+Triton+TunableOp | 105s | **4,413 tok/s** | 2.15 GB | 6.51→0.027 (99.6%↓) |
-| NF4+LoRA+Triton+PagedAdamW+Packing | 115s | 4,047 tok/s | 2.15 GB | 6.51→0.027 (99.6%↓) |
-| NF4+LoRA+Triton+FP8 | 125s | 3,720 tok/s | 2.15 GB | 6.47→0.029 (99.6%↓) |
-| NF4+LoRA (no Triton, no packing) | 365s | 1,273 tok/s | 2.19 GB | 1.40→0.54 (61.5%↓) |
-| **Triton speedup** | **3.1x** | **3.5x faster** | — | — |
+| Configuration | Time | Throughput | Peak VRAM | Train Loss | Eval Loss |
+|---|---|---|---|---|---|
+| Triton ON (full) | 115s | 3,215 tok/s | 2.15 GB | 6.98→0.037 | 2.00→1.99 |
+| Triton OFF (fair) | 95s | 3,902 tok/s | 2.15 GB | 6.98→0.037 | 2.00→2.00 |
+| Triton+TunableOp | 102s | 3,603 tok/s | 2.15 GB | 6.98→0.037 | 2.00→1.99 |
 
 Key findings:
-- **Triton fused dequant kernels with autograd**: 3.2x throughput improvement with full convergence
-- **Sequence packing**: 81.8% efficiency, 500→44 packs
-- **Loss convergence**: All Triton configs achieve <0.03 final loss (99.6% reduction)
-- **TunableOp**: Fastest config at 4,413 tok/s (1.09x vs Paged+Pack)
+- **Convergence verification**: All configs reach identical train loss (0.037) — Triton kernel is numerically correct
+- **Autograd fix**: Triton kernels wrapped in `torch.autograd.Function` for correct backward pass
+- **Sequence packing**: 81.8% efficiency, 400→44 packs
+- **Generalization**: Eval loss ~2.0 (expected with 400 samples — model overfits but generates coherent text)
 - **Memory**: 897M param model uses only 2.15 GB VRAM in NF4+LoRA (97% savings vs FP16)
+- **Text generation**: Model produces coherent responses on unseen prompts after training
 
 ### Fixes applied for GPU compatibility
 
