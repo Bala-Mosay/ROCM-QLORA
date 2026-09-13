@@ -90,7 +90,9 @@ def dequant_int8_matmul_kernel(
         b_fp32 = b_int8.to(tl.float32) * scales.to(tl.float32)
         
         # Matrix multiply — both operands must be same dtype for tl.dot.
-        acc += tl.dot(a.to(tl.float32), b_fp32)
+        # input_precision="ieee" forces full FP32 on gfx942 (MI300X),
+        # bypassing default xf32/TF32 truncation that destroys gradient signals.
+        acc += tl.dot(a.to(tl.float32), b_fp32, input_precision="ieee")
         
         # Advance pointers
         a_ptrs += BLOCK_K * stride_ak
@@ -183,7 +185,7 @@ def dequant_nf4_matmul_kernel(
         
         b_fp32 = b_val.to(tl.float32) * scales.to(tl.float32)
         
-        acc += tl.dot(a.to(tl.float32), b_fp32)
+        acc += tl.dot(a.to(tl.float32), b_fp32, input_precision="ieee")
         
         a_ptrs += BLOCK_K * stride_ak
 

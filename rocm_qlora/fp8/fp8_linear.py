@@ -31,12 +31,14 @@ class _FP8LinearFunc(torch.autograd.Function):
 
         try:
             f8_dtype = get_fp8_dtype("e4m3")
-            # Per-tensor scaling: absmax / 448.0 (max E4M3 value)
-            w_scale = torch.tensor(w_fp16.abs().max().item() / 448.0, dtype=torch.float32, device=x.device)
+            # Per-tensor scaling: absmax / fp8_max
+            # float8_e4m3fnuz (AMD): max=240.0, float8_e4m3fn (NVIDIA): max=448.0
+            fp8_max = torch.finfo(f8_dtype).max
+            w_scale = torch.tensor(w_fp16.abs().max().item() / fp8_max, dtype=torch.float32, device=x.device)
             w_f8 = (w_fp16 / w_scale).to(f8_dtype)
 
             x_2d = x.reshape(-1, x.shape[-1]) if x.dim() > 2 else x
-            x_scale = torch.tensor(x_2d.abs().max().item() / 448.0, dtype=torch.float32, device=x.device)
+            x_scale = torch.tensor(x_2d.abs().max().item() / fp8_max, dtype=torch.float32, device=x.device)
             x_f8 = (x_2d / x_scale).to(f8_dtype)
 
             out = torch._scaled_mm(x_f8, w_f8.t(), scale_a=x_scale, scale_b=w_scale, out_dtype=x.dtype)
