@@ -1,9 +1,9 @@
 """
-rocm-qlora MI300X Benchmark Demo (v7)
+rocm-qlora MI300X Benchmark Demo (v8)
 ======================================
 Trains TinyLlama-1.1B on Alpaca with different configurations.
 Fair comparison: Triton ON vs OFF with identical pipelines.
-Includes eval loss, text generation, and 500 samples.
+Includes eval loss, text generation, and 5000 samples for generalization.
 
 Usage:
     export HF_TOKEN=hf_...
@@ -28,9 +28,9 @@ from torch.utils.data import DataLoader, TensorDataset, Subset
 # Configuration
 # ============================================================================
 MODEL_ID = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-DATASET_SIZE = 500
-TRAIN_SIZE = 400
-EVAL_SIZE = 100
+DATASET_SIZE = 5000
+TRAIN_SIZE = 4000
+EVAL_SIZE = 1000
 MAX_SEQ_LEN = 512
 NUM_EPOCHS = 10
 BATCH_SIZE = 2
@@ -87,7 +87,7 @@ def format_alpaca(sample):
     )
 
 
-def prepare_alpaca_split(tokenizer, max_length=512, train_size=400, eval_size=100):
+def prepare_alpaca_split(tokenizer, max_length=512, train_size=4000, eval_size=1000):
     """Load Alpaca, split into train/eval, return both datasets."""
     from datasets import load_dataset
     total = train_size + eval_size
