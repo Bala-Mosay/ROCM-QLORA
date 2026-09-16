@@ -488,6 +488,16 @@ pytest tests/v4/ -v  # V4 advanced tests
 
 - **ROCm version requirement**: ROCm < 6.0 not supported.
 
+### Fixed in v5.0
+
+These issues were discovered during MI300X VF validation and fixed:
+
+- **Triton `tl.dot` broken on gfx942**: triton-rocm 3.7.1 `tl.dot` produces garbage regardless of `input_precision` setting. Fixed with manual FP32 accumulation via `tl.sum` (~2x slower but numerically correct).
+
+- **Triton kernels not differentiable**: `@triton.jit` kernels are not differentiable by default — gradients only flow through LoRA, never through base layer. Fixed by wrapping in `torch.autograd.Function` (forward: Triton, backward: PyTorch dequant + `torch.mm`).
+
+- **HIP kernel compilation on ROCm 7.14**: Missing `hip/hip_runtime.h` headers on DigitalOcean ROCm image. Triton fallback works correctly — HIP kernels are optional.
+
 ## Roadmap
 
 - [ ] HIP assembly kernels for INT4 matmul (beyond Triton)
