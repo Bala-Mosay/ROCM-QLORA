@@ -14,3 +14,4 @@ cloud_results/
 tmp_*.py
 hello_test.py
 benchmark_cpu.py
+models/

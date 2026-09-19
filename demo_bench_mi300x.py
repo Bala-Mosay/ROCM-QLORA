@@ -1,12 +1,11 @@
 """
-rocm-qlora MI300X Benchmark Demo (v8)
+rocm-qlora MI300X Benchmark Demo (v9)
 ======================================
-Trains TinyLlama-1.1B on Alpaca with different configurations.
+Trains Phi-2 (2.7B) on Dolly 15K with different configurations.
 Fair comparison: Triton ON vs OFF with identical pipelines.
-Includes eval loss, text generation, and 5000 samples for generalization.
+Includes eval loss, text generation, and 15K samples for generalization.
 
 Usage:
-    export HF_TOKEN=hf_...
     python3 demo_bench_mi300x.py
 """
 
@@ -27,27 +26,30 @@ from torch.utils.data import DataLoader, TensorDataset, Subset
 # ============================================================================
 # Configuration
 # ============================================================================
-MODEL_ID = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-DATASET_SIZE = 5000
-TRAIN_SIZE = 4000
-EVAL_SIZE = 1000
+MODEL_ID = "/root/models/phi-2"
+DATASET_NAME = "databricks/databricks-dolly-15k"
+DATASET_SIZE = 15000
+TRAIN_SIZE = 12000
+EVAL_SIZE = 1500
+TEST_SIZE = 1500
 MAX_SEQ_LEN = 512
-NUM_EPOCHS = 10
+NUM_EPOCHS = 3
 BATCH_SIZE = 2
 GRAD_ACCUM = 4
 LR = 2e-4
 LORA_R = 16
 LORA_ALPHA = 32
 LORA_DROPOUT = 0.05
-TARGET_MODULES = ["q_proj", "v_proj", "k_proj", "o_proj"]
+TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "dense"]
 SEED = 42
 LOG_EVERY = 20
 
-# Text generation prompts for quality check
 GEN_PROMPTS = [
     "### Instruction:\nExplain what a neural network is in simple terms.\n\n### Response:\n",
     "### Instruction:\nWrite a short poem about the ocean.\n\n### Response:\n",
     "### Instruction:\nWhat are the benefits of exercise?\n\n### Response:\n",
+    "### Instruction:\nExplain the difference between supervised and unsupervised learning.\n\n### Response:\n",
+    "### Instruction:\nWrite a Python function to check if a number is prime.\n\n### Response:\n",
 ]
 
 
@@ -74,61 +76,45 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def format_alpaca(sample):
-    if sample["input"].strip():
+def format_dolly(sample):
+    instruction = sample["instruction"]
+    context = sample.get("context", "").strip()
+    response = sample["response"]
+    if context:
         return (
-            f"### Instruction:\n{sample['instruction']}\n\n"
-            f"### Input:\n{sample['input']}\n\n"
-            f"### Response:\n{sample['output']}"
+            f"### Instruction:\n{instruction}\n\n"
+            f"### Context:\n{context}\n\n"
+            f"### Response:\n{response}"
         )
     return (
-        f"### Instruction:\n{sample['instruction']}\n\n"
-        f"### Response:\n{sample['output']}"
+        f"### Instruction:\n{instruction}\n\n"
+        f"### Response:\n{response}"
     )
 
 
-def prepare_alpaca_split(tokenizer, max_length=512, train_size=4000, eval_size=1000):
-    """Load Alpaca, split into train/eval, return both datasets."""
+def prepare_dolly_split(tokenizer, max_length=512, train_size=12000, eval_size=1500, test_size=1500):
     from datasets import load_dataset
-    total = train_size + eval_size
-    raw = load_dataset("tatsu-lab/alpaca", split=f"train[:{total}]")
-
-    input_ids_list = []
-    attention_mask_list = []
-    labels_list = []
-
+    total = train_size + eval_size + test_size
+    raw = load_dataset(DATASET_NAME, split=f"train[:{total}]")
+    input_ids_list, attention_mask_list, labels_list = [], [], []
     for sample in raw:
-        text = format_alpaca(sample)
-        tokens = tokenizer(
-            text,
-            max_length=max_length,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
-        )
+        text = format_dolly(sample)
+        tokens = tokenizer(text, max_length=max_length, truncation=True, padding="max_length", return_tensors="pt")
         ids = tokens["input_ids"].squeeze(0)
         mask = tokens["attention_mask"].squeeze(0)
         labels = ids.clone()
         labels[ids == tokenizer.pad_token_id] = -100
-
         input_ids_list.append(ids)
         attention_mask_list.append(mask)
         labels_list.append(labels)
-
-    all_data = TensorDataset(
-        torch.stack(input_ids_list),
-        torch.stack(attention_mask_list),
-        torch.stack(labels_list),
-    )
-
+    all_data = TensorDataset(torch.stack(input_ids_list), torch.stack(attention_mask_list), torch.stack(labels_list))
     train_dataset = Subset(all_data, list(range(train_size)))
     eval_dataset = Subset(all_data, list(range(train_size, train_size + eval_size)))
-
-    return train_dataset, eval_dataset
+    test_dataset = Subset(all_data, list(range(train_size + eval_size, total)))
+    return train_dataset, eval_dataset, test_dataset
 
 
 def compute_eval_loss(model, eval_loader, device, max_batches=50):
-    """Compute average loss over eval set."""
     model.eval()
     total_loss = 0.0
     count = 0
@@ -149,20 +135,15 @@ def compute_eval_loss(model, eval_loader, device, max_batches=50):
 
 
 @torch.no_grad()
-def generate_samples(model, tokenizer, device, prompts, max_new_tokens=150):
-    """Generate text from prompts for quality check."""
+def generate_samples(model, tokenizer, device, prompts, max_new_tokens=200):
     model.eval()
     results = []
     for prompt in prompts:
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
         input_len = inputs["input_ids"].shape[1]
         outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=True,
-            temperature=0.7,
-            top_p=0.9,
-            pad_token_id=tokenizer.pad_token_id,
+            **inputs, max_new_tokens=max_new_tokens, do_sample=True,
+            temperature=0.7, top_p=0.9, pad_token_id=tokenizer.pad_token_id,
         )
         generated = tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True)
         results.append(generated.strip())
@@ -171,50 +152,33 @@ def generate_samples(model, tokenizer, device, prompts, max_new_tokens=150):
 
 
 def run_training_config(
-    config_name: str,
-    bits: int = 4,
-    use_triton: bool = True,
-    use_paged_opt: bool = True,
-    use_packing: bool = True,
-    use_fp8: bool = False,
-    use_tunableop: bool = False,
-    epochs: int = NUM_EPOCHS,
-    batch_size: int = BATCH_SIZE,
-    grad_accum: int = GRAD_ACCUM,
-    max_seq_len: int = MAX_SEQ_LEN,
-    lr: float = LR,
-    gen_prompts: List[str] = None,
-) -> BenchResult:
-    """Run a single training configuration and return metrics."""
+    config_name, bits=4, use_triton=True, use_paged_opt=True, use_packing=True,
+    use_fp8=False, use_tunableop=False, epochs=NUM_EPOCHS, batch_size=BATCH_SIZE,
+    grad_accum=GRAD_ACCUM, max_seq_len=MAX_SEQ_LEN, lr=LR, gen_prompts=None,
+):
     from rocm_qlora import quantize_model, enable_all_kernels
     from rocm_qlora.optim import PagedAdamW
     from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
 
     result = BenchResult(config_name=config_name)
     device = torch.device("cuda")
-
     set_seed(SEED)
 
     print(f"\n{'='*60}")
     print(f"  CONFIG: {config_name}")
     print(f"{'='*60}")
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
-        torch_dtype=torch.float16,
-        low_cpu_mem_usage=True,
+        MODEL_ID, torch_dtype=torch.float16, low_cpu_mem_usage=True, trust_remote_code=True,
     )
 
     model = quantize_model(
-        model,
-        bits=bits,
-        lora_r=LORA_R,
-        lora_alpha=LORA_ALPHA,
-        lora_dropout=LORA_DROPOUT,
-        target_modules=TARGET_MODULES,
+        model, bits=bits, lora_r=LORA_R, lora_alpha=LORA_ALPHA,
+        lora_dropout=LORA_DROPOUT, target_modules=TARGET_MODULES,
     )
 
     result.total_params = sum(p.numel() for p in model.parameters())
@@ -226,21 +190,6 @@ def run_training_config(
     else:
         print(f"  Triton kernels: DISABLED (PyTorch fallback)")
 
-    if use_fp8:
-        from rocm_qlora.fp8 import detect_fp8_support, wrap_model_for_fp8, FP8Config
-        fp8_info = detect_fp8_support()
-        if fp8_info["fp8_supported"]:
-            fp8_config = FP8Config(use_transformer_engine=fp8_info["transformer_engine_available"])
-            model, wrap_info = wrap_model_for_fp8(model, fp8_config)
-            if wrap_info["enabled"]:
-                print(f"  FP8: ENABLED ({wrap_info['backend']}, {wrap_info['layers_wrapped']} layers)")
-            else:
-                print(f"  FP8: SKIPPED ({wrap_info['reason']})")
-                use_fp8 = False
-        else:
-            print(f"  FP8: NOT SUPPORTED")
-            use_fp8 = False
-
     if use_tunableop:
         from rocm_qlora.profiling import enable_tunableop, switch_to_load_only
         enable_tunableop("./tunableop_cache")
@@ -249,22 +198,19 @@ def run_training_config(
     model = model.to(device)
     model.gradient_checkpointing_enable()
 
-    # ── Prepare data with train/eval split ──
-    train_dataset, eval_dataset = prepare_alpaca_split(
-        tokenizer, max_length=max_seq_len, train_size=TRAIN_SIZE, eval_size=EVAL_SIZE
+    train_dataset, eval_dataset, test_dataset = prepare_dolly_split(
+        tokenizer, max_length=max_seq_len, train_size=TRAIN_SIZE, eval_size=EVAL_SIZE, test_size=TEST_SIZE
     )
-    print(f"  Data: {TRAIN_SIZE} train, {EVAL_SIZE} eval samples")
+    print(f"  Data: {TRAIN_SIZE} train, {EVAL_SIZE} eval, {TEST_SIZE} test samples")
 
     if use_packing:
         from rocm_qlora.data import build_packed_dataset, PackedSequenceCollator
         from datasets import load_dataset
-        raw = load_dataset("tatsu-lab/alpaca", split=f"train[:{TRAIN_SIZE}]")
-        texts = [format_alpaca(s) for s in raw]
+        raw = load_dataset(DATASET_NAME, split=f"train[:{TRAIN_SIZE}]")
+        texts = [format_dolly(s) for s in raw]
         packed, efficiency = build_packed_dataset(texts, tokenizer, max_length=max_seq_len)
         collator = PackedSequenceCollator(
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-            use_block_attention=True,
+            pad_token_id=tokenizer.pad_token_id, eos_token_id=tokenizer.eos_token_id, use_block_attention=True,
         )
         train_loader = DataLoader(packed, batch_size=batch_size, collate_fn=collator, shuffle=True)
         print(f"  Packing: {efficiency['efficiency_pct']:.1f}% efficiency")
@@ -272,10 +218,8 @@ def run_training_config(
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         print(f"  Packing: DISABLED")
 
-    # Eval loader (always no packing, standard padding)
     eval_loader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=False)
 
-    # ── Optimizer ──
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if use_paged_opt:
         optimizer = PagedAdamW(trainable_params, lr=lr, weight_decay=0.01)
@@ -287,11 +231,9 @@ def run_training_config(
     scheduler = get_cosine_schedule_with_warmup(
         optimizer, num_warmup_steps=min(10, total_steps // 10), num_training_steps=total_steps
     )
-
     print(f"  Steps: {total_steps} ({len(train_loader)} batches/epoch, {grad_accum} grad_accum)")
     print(f"  Training...")
 
-    # ── Training loop ──
     model.train()
     global_step = 0
     total_tokens = 0
@@ -299,6 +241,9 @@ def run_training_config(
     peak_vram = 0.0
     epoch_losses = []
     eval_losses = []
+    best_eval_loss = float("inf")
+    patience = 2
+    patience_counter = 0
 
     for epoch in range(epochs):
         epoch_loss = 0.0
@@ -316,7 +261,6 @@ def run_training_config(
             outputs = model(**batch)
             loss = outputs.loss / grad_accum
             loss.backward()
-
             total_tokens += (labels != -100).sum().item()
 
             if (step + 1) % grad_accum == 0:
@@ -325,7 +269,6 @@ def run_training_config(
                 scheduler.step()
                 optimizer.zero_grad()
                 global_step += 1
-
                 current_loss = loss.item() * grad_accum
                 epoch_loss += current_loss
                 epoch_steps += 1
@@ -342,14 +285,20 @@ def run_training_config(
 
         avg_epoch_loss = epoch_loss / max(epoch_steps, 1)
         epoch_losses.append(avg_epoch_loss)
-
-        # Eval loss
         eval_loss = compute_eval_loss(model, eval_loader, device)
         eval_losses.append(eval_loss)
-
         elapsed = time.time() - start_time
         print(f"  Epoch {epoch+1}/{epochs} | Train: {avg_epoch_loss:.4f} | Eval: {eval_loss:.4f} | "
               f"Elapsed: {elapsed:.1f}s")
+
+        if eval_loss < best_eval_loss:
+            best_eval_loss = eval_loss
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience and epoch >= 1:
+                print(f"  Early stopping at epoch {epoch+1}")
+                break
 
         if use_tunableop and epoch == 0:
             from rocm_qlora.profiling import switch_to_load_only
@@ -374,35 +323,31 @@ def run_training_config(
     print(f"    Eval Loss:  {eval_losses[0]:.4f} -> {result.final_eval_loss:.4f}")
     print(f"    Throughput: {result.tokens_per_sec:.0f} tokens/sec")
 
-    # ── Text generation quality check ──
     if gen_prompts:
         print(f"\n  === Text Generation (after training) ===")
         samples = generate_samples(model, tokenizer, device, gen_prompts)
         for i, (prompt, gen) in enumerate(zip(gen_prompts, samples)):
             instruction = prompt.split("### Response:\n")[0].split("### Instruction:\n")[1].strip()
-            print(f"\n  Prompt {i+1}: {instruction[:60]}...")
-            print(f"  Generated: {gen[:200]}...")
+            print(f"\n  Prompt {i+1}: {instruction[:80]}...")
+            print(f"  Generated: {gen[:300]}...")
 
-    # Cleanup
     del model, optimizer, scheduler, train_loader, eval_loader
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
-
     return result
 
 
-def print_comparison_table(results: List[BenchResult]):
-    """Print a formatted comparison table."""
-    print(f"\n{'='*90}")
-    print(f"  MI300X BENCHMARK RESULTS — TinyLlama-1.1B on Alpaca ({NUM_EPOCHS} epochs)")
+def print_comparison_table(results):
+    print(f"\n{'='*95}")
+    print(f"  MI300X BENCHMARK RESULTS — Phi-2 (2.7B) on Dolly 15K ({NUM_EPOCHS} epochs)")
     print(f"  GPU: {torch.cuda.get_device_name(0)} | VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-    print(f"  Train: {TRAIN_SIZE} samples | Eval: {EVAL_SIZE} samples")
-    print(f"{'='*90}")
+    print(f"  Train: {TRAIN_SIZE} | Eval: {EVAL_SIZE} | Test: {TEST_SIZE}")
+    print(f"{'='*95}")
 
     header = (f"{'Config':<30} {'Time':>7} {'tok/s':>7} {'VRAM':>7} "
-              f"{'Train Loss':>12} {'Eval Loss':>10}")
+              f"{'Train Loss':>14} {'Eval Loss':>12}")
     print(header)
-    print("-" * 90)
+    print("-" * 95)
 
     for r in results:
         loss_start = r.loss_curve[0] if r.loss_curve else 0.0
@@ -412,100 +357,63 @@ def print_comparison_table(results: List[BenchResult]):
             f"{r.total_time_s:>6.1f}s "
             f"{r.tokens_per_sec:>6.0f} "
             f"{r.peak_vram_gb:>6.2f}G "
-            f"{loss_start:>5.4f}->{r.final_loss:<5.4f} "
-            f"{eval_start:>5.4f}->{r.final_eval_loss:<5.4f}"
+            f"{loss_start:>6.4f}->{r.final_loss:<6.4f} "
+            f"{eval_start:>6.4f}->{r.final_eval_loss:<6.4f}"
         )
         print(row)
 
-    print("-" * 90)
+    print("-" * 95)
 
-    # Fair comparison section: same-pipeline configs
-    fair_pairs = []
-    for i, r1 in enumerate(results):
-        for r2 in results[i+1:]:
-            # Check if configs differ only in triton
-            if (r1.peak_vram_gb == r2.peak_vram_gb and
-                r1.total_params == r2.total_params and
-                abs(r1.total_time_s - r2.total_time_s) > 1):
-                if r1.tokens_per_sec > r2.tokens_per_sec:
-                    fair_pairs.append((r1, r2))
-                else:
-                    fair_pairs.append((r2, r1))
-
-    if fair_pairs:
-        print(f"\n  FAIR COMPARISON (identical pipeline, only Triton differs):")
-        for faster, slower in fair_pairs:
-            speedup = faster.tokens_per_sec / slower.tokens_per_sec
-            print(f"    {faster.config_name}: {faster.tokens_per_sec:.0f} tok/s "
-                  f"vs {slower.config_name}: {slower.tokens_per_sec:.0f} tok/s "
-                  f"= {speedup:.2f}x speedup")
-            print(f"    Train loss: {faster.final_loss:.4f} vs {slower.final_loss:.4f} "
-                  f"(convergence {'MATCHES' if abs(faster.final_loss - slower.final_loss) < 0.05 else 'DIFFERS'})")
-            print(f"    Eval loss:  {faster.final_eval_loss:.4f} vs {slower.final_eval_loss:.4f}")
-
-    # Generalization check
     print(f"\n  GENERALIZATION (Train vs Eval loss):")
     for r in results:
         gap = r.final_eval_loss - r.final_loss
-        status = "OK (gap < 0.1)" if abs(gap) < 0.1 else f"WARNING (gap = {gap:.4f})"
-        print(f"    {r.config_name}: train={r.final_loss:.4f}, eval={r.final_eval_loss:.4f} — {status}")
+        if gap < 0.5:
+            status = "EXCELLENT (gap < 0.5)"
+        elif gap < 1.0:
+            status = f"GOOD (gap = {gap:.4f})"
+        else:
+            status = f"OVERFITTING (gap = {gap:.4f})"
+        print(f"    {r.config_name}: train={r.final_loss:.4f}, eval={r.final_eval_loss:.4f} -- {status}")
 
-    print(f"{'='*90}\n")
+    print(f"{'='*95}\n")
 
 
 def main():
     print("=" * 60)
-    print("  rocm-qlora MI300X Benchmark v7")
+    print("  rocm-qlora MI300X Benchmark v9 — Phi-2 + Dolly 15K")
     print(f"  {torch.cuda.get_device_name(0)} | "
           f"{torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB VRAM")
     print(f"  PyTorch {torch.__version__} | "
           f"ROCm {torch.version.hip if hasattr(torch.version, 'hip') and torch.version.hip else 'N/A'}")
+    print(f"  Model: {MODEL_ID}")
+    print(f"  Dataset: {DATASET_NAME} ({TRAIN_SIZE} train / {EVAL_SIZE} eval / {TEST_SIZE} test)")
     print("=" * 60)
 
     results = []
 
-    # Config A: Triton ON (full features)
     results.append(run_training_config(
-        config_name="Triton ON (full)",
-        bits=4,
-        use_triton=True,
-        use_paged_opt=True,
-        use_packing=True,
-        use_fp8=False,
-        use_tunableop=False,
+        config_name="Triton ON (full)", bits=4, use_triton=True,
+        use_paged_opt=True, use_packing=True, use_fp8=False, use_tunableop=False,
         gen_prompts=GEN_PROMPTS,
     ))
 
-    # Config B: Triton OFF (fair comparison — same pipeline as A)
     results.append(run_training_config(
-        config_name="Triton OFF (fair)",
-        bits=4,
-        use_triton=False,
-        use_paged_opt=True,
-        use_packing=True,
-        use_fp8=False,
-        use_tunableop=False,
+        config_name="Triton OFF (fair)", bits=4, use_triton=False,
+        use_paged_opt=True, use_packing=True, use_fp8=False, use_tunableop=False,
         gen_prompts=GEN_PROMPTS,
     ))
 
-    # Config C: Triton + TunableOp
     results.append(run_training_config(
-        config_name="Triton+TunableOp",
-        bits=4,
-        use_triton=True,
-        use_paged_opt=True,
-        use_packing=True,
-        use_fp8=False,
-        use_tunableop=True,
+        config_name="Triton+TunableOp", bits=4, use_triton=True,
+        use_paged_opt=True, use_packing=True, use_fp8=False, use_tunableop=True,
         gen_prompts=None,
     ))
 
     print_comparison_table(results)
 
-    # Save results
     output_dir = "./benchmark_results"
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "mi300x_benchmark_v7.json")
+    output_path = os.path.join(output_dir, "mi300x_benchmark_v9_phi2.json")
 
     output = {
         "gpu": torch.cuda.get_device_name(0),
@@ -513,7 +421,7 @@ def main():
         "pytorch_version": torch.__version__,
         "rocm_version": torch.version.hip if hasattr(torch.version, 'hip') and torch.version.hip else "N/A",
         "model": MODEL_ID,
-        "dataset": f"Alpaca ({TRAIN_SIZE} train / {EVAL_SIZE} eval)",
+        "dataset": f"Dolly 15K ({TRAIN_SIZE} train / {EVAL_SIZE} eval / {TEST_SIZE} test)",
         "epochs": NUM_EPOCHS,
         "max_seq_len": MAX_SEQ_LEN,
         "configs": [asdict(r) for r in results],
